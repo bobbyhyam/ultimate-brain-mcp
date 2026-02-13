@@ -1,6 +1,6 @@
 [project]
 name = "ultimate-brain-mcp"
-version = "0.1.0"
+version = "0.1.1"
 description = "MCP server for Thomas Frank's Ultimate Brain Notion system"
 readme = "README.md"
 license = "MIT"
@@ -23,6 +23,7 @@ dependencies = [
 
 [project.scripts]
 ultimate-brain-mcp = "ultimate_brain_mcp:main"
+ultimate-brain-setup = "ultimate_brain_mcp.setup_client:main"
 
 [dependency-groups]
 dev = [
