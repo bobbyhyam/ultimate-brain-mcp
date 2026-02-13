@@ -6,52 +6,28 @@ An MCP server for managing Thomas Frank's Ultimate Brain Notion system. Provides
 
 1. Create a [Notion integration](https://www.notion.so/my-integrations) and share your Ultimate Brain databases with it.
 
-2. Auto-discover data source IDs:
+2. Run the setup command for your client. It will auto-discover your data sources from Notion and write the config file.
+
+### Claude Code
 
 ```bash
-uv run python setup_dev.py
+# Project scope (writes .mcp.json in current directory)
+uvx --from ultimate-brain-mcp ultimate-brain-setup --client claude-code --scope project
+
+# User scope (writes ~/.claude.json)
+uvx --from ultimate-brain-mcp ultimate-brain-setup --client claude-code --scope user
 ```
 
-3. Run the server:
+### Claude Desktop
 
 ```bash
-uv run ultimate-brain-mcp
+uvx --from ultimate-brain-mcp ultimate-brain-setup --client claude-desktop
 ```
 
-## Claude Code Integration
+You can also pass your Notion secret via environment variable to skip the prompt:
 
 ```bash
-claude mcp add ultimate-brain \
-  -e NOTION_INTEGRATION_SECRET=secret_... \
-  -e UB_TASKS_DS_ID=... \
-  -e UB_PROJECTS_DS_ID=... \
-  -e UB_NOTES_DS_ID=... \
-  -e UB_TAGS_DS_ID=... \
-  -e UB_GOALS_DS_ID=... \
-  -- uvx ultimate-brain-mcp
-```
-
-## Claude Desktop
-
-Add to `claude_desktop_config.json`:
-
-```json
-{
-  "mcpServers": {
-    "ultimate-brain": {
-      "command": "uvx",
-      "args": ["ultimate-brain-mcp"],
-      "env": {
-        "NOTION_INTEGRATION_SECRET": "secret_...",
-        "UB_TASKS_DS_ID": "...",
-        "UB_PROJECTS_DS_ID": "...",
-        "UB_NOTES_DS_ID": "...",
-        "UB_TAGS_DS_ID": "...",
-        "UB_GOALS_DS_ID": "..."
-      }
-    }
-  }
-}
+NOTION_INTEGRATION_SECRET=secret_... uvx --from ultimate-brain-mcp ultimate-brain-setup --client claude-code --scope project
 ```
 
 ## Tools
