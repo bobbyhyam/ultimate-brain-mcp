@@ -17,7 +17,7 @@ from ultimate_brain_mcp.notion_client import NotionClient
 def pytest_configure(config):
     """Load .env at the very start of the test session."""
     env_path = Path(__file__).parent.parent / ".env"
-    load_dotenv(env_path)
+    load_dotenv(env_path, override=True)
 
 
 @pytest.fixture

@@ -633,10 +633,11 @@ async def search_notes(
     tag_id: Annotated[str | None, Field(description="Filter by tag page ID.")] = None,
     favorite: Annotated[bool | None, Field(description="Filter to favorites only.")] = None,
     date_after: Annotated[str | None, Field(description="Notes on or after this date (YYYY-MM-DD).")] = None,
+    query: Annotated[str | None, Field(description="Text to search for in note titles.")] = None,
     limit: Annotated[int, Field(description="Maximum results.", ge=1, le=100)] = 50,
     ctx: Context = None,
 ) -> list[dict] | dict:
-    """Search notes by type, project, tag, favorite status, or date.
+    """Search notes by title text, type, project, tag, favorite status, or date.
     For note content/body, use get_note_content with the note ID."""
     app = _ctx(ctx)
     filters: list[dict] = []
@@ -651,6 +652,8 @@ async def search_notes(
         filters.append({"property": "Favorite", "checkbox": {"equals": True}})
     if date_after:
         filters.append({"property": "Note Date", "date": {"on_or_after": date_after}})
+    if query:
+        filters.append({"property": "Name", "title": {"contains": query}})
 
     query_filter = {"and": filters} if len(filters) > 1 else (filters[0] if filters else None)
     sorts = [{"property": "Note Date", "direction": "descending"}]

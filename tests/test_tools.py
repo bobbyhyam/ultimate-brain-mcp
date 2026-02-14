@@ -121,6 +121,36 @@ async def test_search_tags(server_params, _check_env):
 
 
 @pytest.mark.asyncio
+async def test_search_notes(server_params, _check_env):
+    """search_notes returns notes (may be empty on fresh UB instance)."""
+    async with stdio_client(server_params) as (read, write):
+        async with ClientSession(read, write) as session:
+            await session.initialize()
+            result = await session.call_tool("search_notes", {"limit": 5})
+            data = _parse_result(result)
+            assert isinstance(data, list)
+            if data:
+                assert "id" in data[0]
+                assert "name" in data[0]
+                assert "type" in data[0]
+
+
+@pytest.mark.asyncio
+async def test_search_notes_query(server_params, _check_env):
+    """search_notes with query filters by title text."""
+    async with stdio_client(server_params) as (read, write):
+        async with ClientSession(read, write) as session:
+            await session.initialize()
+            # A nonsense query should return no matches, proving the filter is active
+            result = await session.call_tool(
+                "search_notes", {"query": "zzz_nonexistent_xyzzy_99", "limit": 5}
+            )
+            data = _parse_result(result)
+            assert isinstance(data, list)
+            assert len(data) == 0
+
+
+@pytest.mark.asyncio
 async def test_search_projects(server_params, _check_env):
     """search_projects returns projects (may be empty on fresh UB instance)."""
     async with stdio_client(server_params) as (read, write):
