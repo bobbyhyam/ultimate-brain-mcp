@@ -29,6 +29,10 @@ uv run pytest tests/test_tools.py -k test_search_tasks
 
 # Build for distribution
 uv build
+
+# Release a new version (bumps version, commits, tags, pushes)
+./scripts/release.sh <major|minor|patch> "<commit message>"
+./scripts/release.sh patch "Fix bug" --dry-run  # local only, no push
 ```
 
 ## Environment Setup
