@@ -96,12 +96,19 @@ class NotionClient:
     # Page CRUD
     # ------------------------------------------------------------------
 
-    async def create_page(self, ds_id: str, properties: dict) -> dict:
-        """POST /v1/pages — create a page in the given data source."""
-        body = {
+    async def create_page(
+        self, ds_id: str, properties: dict, *, children: list[dict] | None = None
+    ) -> dict:
+        """POST /v1/pages — create a page in the given data source.
+
+        If *children* is provided, the blocks are included as initial page body content.
+        """
+        body: dict = {
             "parent": {"data_source_id": ds_id},
             "properties": properties,
         }
+        if children:
+            body["children"] = children
         resp = await self._client.post("/pages", json=body)
         self._raise_for_status(resp)
         return resp.json()
@@ -138,6 +145,27 @@ class NotionClient:
                 break
             cursor = data.get("next_cursor")
         return all_blocks
+
+    async def append_blocks(self, block_id: str, children: list[dict]) -> list[dict]:
+        """PATCH /v1/blocks/{block_id}/children — append child blocks.
+
+        Auto-batches at 100 blocks per request (Notion API limit).
+        Returns the list of created blocks.
+        """
+        created: list[dict] = []
+        for i in range(0, len(children), 100):
+            batch = children[i:i + 100]
+            resp = await self._client.patch(
+                f"/blocks/{block_id}/children", json={"children": batch}
+            )
+            self._raise_for_status(resp)
+            created.extend(resp.json().get("results", []))
+        return created
+
+    async def delete_block(self, block_id: str) -> None:
+        """DELETE /v1/blocks/{block_id} — delete (archive) a single block."""
+        resp = await self._client.delete(f"/blocks/{block_id}")
+        self._raise_for_status(resp)
 
     # ------------------------------------------------------------------
     # Search (used by setup_dev.py — not used at runtime)

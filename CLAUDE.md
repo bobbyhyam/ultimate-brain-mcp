@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Ultimate Brain MCP is a Python MCP (Model Context Protocol) server that exposes Thomas Frank's Ultimate Brain Notion system as 26 tools for AI assistants. Built on Anthropic's FastMCP SDK with async httpx for Notion API calls.
+Ultimate Brain MCP is a Python MCP (Model Context Protocol) server that exposes Thomas Frank's Ultimate Brain Notion system as 28 tools for AI assistants. Built on Anthropic's FastMCP SDK with async httpx for Notion API calls.
 
 ## Common Commands
 
@@ -41,11 +41,11 @@ Six required env vars: `NOTION_SECRET`, `TASKS_DS_ID`, `PROJECTS_DS_ID`, `NOTES_
 
 **Source layout:** `src/ultimate_brain_mcp/` with four modules:
 
-- **`server.py`** — All 26 MCP tool definitions using `@mcp.tool()` decorators. Tools are grouped: Tasks (6), Projects (4), Notes (4), Tags (3), Goals (4), Cross-cutting (2), Generic (3). Each tool uses `ToolAnnotations` to declare read-only vs destructive. Property builder helpers (`_prop_title`, `_prop_select`, etc.) construct Notion API property payloads. `_coerce_property()` auto-converts Python types to Notion property format for the generic `update_page` tool.
+- **`server.py`** — All 28 MCP tool definitions using `@mcp.tool()` decorators. Tools are grouped: Tasks (6), Projects (4), Notes (4), Tags (3), Goals (4), Cross-cutting (3: `daily_summary`, `archive_item`, `set_page_content`), Generic (4: `query_database`, `get_page`, `get_page_content`, `update_page`). The 4 create tools (`create_task`, `create_note`, `create_project`, `create_goal`) accept an optional `content` parameter for page body content. Each tool uses `ToolAnnotations` to declare read-only vs destructive. Property builder helpers (`_prop_title`, `_prop_select`, etc.) construct Notion API property payloads. `_coerce_property()` auto-converts Python types to Notion property format for the generic `update_page` tool.
 
-- **`notion_client.py`** — Async httpx wrapper around Notion API v2025-09-03. Uses the data_sources query endpoint (not legacy database queries). Core methods: `query_all()` (paginated), `create_page()`, `get_page()`, `update_page()`, `get_blocks()`. Raises `NotionAPIError` with status-specific hints.
+- **`notion_client.py`** — Async httpx wrapper around Notion API v2025-09-03. Uses the data_sources query endpoint (not legacy database queries). Core methods: `query_all()` (paginated), `create_page()` (supports `children` for inline body content), `get_page()`, `update_page()`, `get_blocks()`, `append_blocks()`, `delete_block()`. Raises `NotionAPIError` with status-specific hints.
 
-- **`formatters.py`** — Transforms raw Notion JSON into agent-friendly dicts. Per-database formatters (`format_task`, `format_project`, etc.) plus `format_generic_page` for secondary databases. Property extractors (`_title`, `_select`, `_status`, `_relation`, etc.) handle Notion's nested property format. `blocks_to_text()` converts page block content to readable text.
+- **`formatters.py`** — Transforms raw Notion JSON into agent-friendly dicts. Per-database formatters (`format_task`, `format_project`, etc.) plus `format_generic_page` for secondary databases. Property extractors (`_title`, `_select`, `_status`, `_relation`, etc.) handle Notion's nested property format. `blocks_to_text()` converts page block content to readable text. `text_to_blocks()` does the inverse — parses markdown-like text into Notion block dicts.
 
 - **`config.py`** — `UBConfig` dataclass loaded from env vars. Defines valid statuses, priorities, tag types, and note types as constants. Maps secondary database env var names.
 
@@ -57,6 +57,8 @@ Tests require a live Notion workspace with valid credentials in `.env`. Tests sk
 
 - `test_tools.py` — Spins up the MCP server via stdio client, verifies tool registration, and executes tools against the live API.
 - `test_formatters.py` — Tests Notion JSON → formatted dict transformations using live data.
+- `test_block_builders.py` — Unit tests for `text_to_blocks()` parser (no Notion credentials needed).
+- `test_content.py` — Live API integration tests for page body content (create with content, set/append/clear content, get_page_content).
 - `conftest.py` — Seed fixtures create items prefixed with `[TEST]` and archive them on teardown.
 
 ## Adding New Tools
