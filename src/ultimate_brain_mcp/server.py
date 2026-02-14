@@ -1,4 +1,4 @@
-"""FastMCP server with 26 tools for Thomas Frank's Ultimate Brain."""
+"""FastMCP server with 28 tools for Thomas Frank's Ultimate Brain."""
 
 from __future__ import annotations
 
@@ -30,6 +30,7 @@ from .formatters import (
     format_project,
     format_tag,
     format_task,
+    text_to_blocks,
 )
 from .notion_client import NotionAPIError, NotionClient
 
@@ -293,6 +294,14 @@ async def create_task(
         str | None,
         Field(description="Parent task page ID (for sub-tasks)."),
     ] = None,
+    content: Annotated[
+        str | None,
+        Field(description=(
+            "Page body content as markdown. Supports: # headings, - bullets, "
+            "1. numbered lists, - [ ] to-dos, ```code blocks```, > quotes, --- dividers, "
+            "and plain paragraphs."
+        )),
+    ] = None,
     ctx: Context = None,
 ) -> dict:
     """Create a new task. Only name is required. Use search_projects to find project IDs."""
@@ -314,8 +323,10 @@ async def create_task(
     if parent_task_id:
         props["Parent Task"] = _prop_relation([parent_task_id])
 
+    children = text_to_blocks(content) if content else None
+
     try:
-        page = await app.client.create_page(app.config.tasks_ds_id, props)
+        page = await app.client.create_page(app.config.tasks_ds_id, props, children=children)
         return format_task(page)
     except NotionAPIError as e:
         return _handle_api_error(e, "Check that project/parent IDs are valid.")
@@ -553,6 +564,14 @@ async def create_project(
     deadline: Annotated[str | None, Field(description="Deadline in YYYY-MM-DD format.")] = None,
     tag_id: Annotated[str | None, Field(description="Tag page ID to link.")] = None,
     goal_id: Annotated[str | None, Field(description="Goal page ID to link.")] = None,
+    content: Annotated[
+        str | None,
+        Field(description=(
+            "Page body content as markdown. Supports: # headings, - bullets, "
+            "1. numbered lists, - [ ] to-dos, ```code blocks```, > quotes, --- dividers, "
+            "and plain paragraphs."
+        )),
+    ] = None,
     ctx: Context = None,
 ) -> dict:
     """Create a new project. Use search_tags to find tag IDs, search_goals for goal IDs."""
@@ -567,8 +586,10 @@ async def create_project(
     if goal_id:
         props["Goal"] = _prop_relation([goal_id])
 
+    children = text_to_blocks(content) if content else None
+
     try:
-        page = await app.client.create_page(app.config.projects_ds_id, props)
+        page = await app.client.create_page(app.config.projects_ds_id, props, children=children)
         return format_project(page)
     except NotionAPIError as e:
         return _handle_api_error(e)
@@ -701,6 +722,14 @@ async def create_note(
     project_id: Annotated[str | None, Field(description="Project page ID to link.")] = None,
     tag_ids: Annotated[list[str] | None, Field(description="Tag page IDs to link.")] = None,
     source_url: Annotated[str | None, Field(description="Source URL for the note.")] = None,
+    content: Annotated[
+        str | None,
+        Field(description=(
+            "Page body content as markdown. Supports: # headings, - bullets, "
+            "1. numbered lists, - [ ] to-dos, ```code blocks```, > quotes, --- dividers, "
+            "and plain paragraphs."
+        )),
+    ] = None,
     ctx: Context = None,
 ) -> dict:
     """Create a new note. Use search_projects for project IDs, search_tags for tag IDs."""
@@ -718,8 +747,10 @@ async def create_note(
     if source_url:
         props["URL"] = _prop_url(source_url)
 
+    children = text_to_blocks(content) if content else None
+
     try:
-        page = await app.client.create_page(app.config.notes_ds_id, props)
+        page = await app.client.create_page(app.config.notes_ds_id, props, children=children)
         return format_note(page)
     except NotionAPIError as e:
         return _handle_api_error(e)
@@ -934,6 +965,14 @@ async def create_goal(
     deadline: Annotated[str | None, Field(description="Deadline in YYYY-MM-DD format.")] = None,
     tag_id: Annotated[str | None, Field(description="Tag page ID to link.")] = None,
     project_ids: Annotated[list[str] | None, Field(description="Project page IDs to link.")] = None,
+    content: Annotated[
+        str | None,
+        Field(description=(
+            "Page body content as markdown. Supports: # headings, - bullets, "
+            "1. numbered lists, - [ ] to-dos, ```code blocks```, > quotes, --- dividers, "
+            "and plain paragraphs."
+        )),
+    ] = None,
     ctx: Context = None,
 ) -> dict:
     """Create a new goal. Use search_tags for tag IDs, search_projects for project IDs."""
@@ -948,8 +987,10 @@ async def create_goal(
     if project_ids:
         props["Projects"] = _prop_relation(project_ids)
 
+    children = text_to_blocks(content) if content else None
+
     try:
-        page = await app.client.create_page(app.config.goals_ds_id, props)
+        page = await app.client.create_page(app.config.goals_ds_id, props, children=children)
         return format_goal(page)
     except NotionAPIError as e:
         return _handle_api_error(e)
@@ -998,7 +1039,7 @@ async def update_goal(
 
 
 # =========================================================================
-#  CROSS-CUTTING (2 tools)
+#  CROSS-CUTTING (3 tools)
 # =========================================================================
 
 
@@ -1102,8 +1143,51 @@ async def archive_item(
         return _handle_api_error(e, "Check the page ID is valid.")
 
 
+@mcp.tool(
+    annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=True, idempotentHint=True)
+)
+async def set_page_content(
+    page_id: Annotated[str, Field(description="Page ID of any Notion page.")],
+    content: Annotated[
+        str,
+        Field(description=(
+            "Page body content as markdown. Supports: # headings, - bullets, "
+            "1. numbered lists, - [ ] to-dos, ```code blocks```, > quotes, --- dividers, "
+            "and plain paragraphs."
+        )),
+    ],
+    mode: Annotated[
+        Literal["replace", "append"],
+        Field(description="'replace' removes existing content first (default). 'append' adds after existing content."),
+    ] = "replace",
+    ctx: Context = None,
+) -> dict:
+    """Set or update the body content of any page. Use 'replace' mode to overwrite
+    existing content, or 'append' to add below it. Pass empty content with 'replace'
+    to clear the page body. Works on any page type (tasks, projects, notes, goals, etc.)."""
+    app = _ctx(ctx)
+    new_blocks = text_to_blocks(content)
+
+    try:
+        if mode == "replace":
+            # Fetch existing blocks and delete them all
+            existing = await app.client.get_blocks(page_id)
+            if existing:
+                await asyncio.gather(
+                    *(app.client.delete_block(b["id"]) for b in existing)
+                )
+
+        # Append new blocks (if any)
+        if new_blocks:
+            await app.client.append_blocks(page_id, new_blocks)
+
+        return {"ok": True, "page_id": page_id, "mode": mode, "blocks_written": len(new_blocks)}
+    except NotionAPIError as e:
+        return _handle_api_error(e, "Check the page ID is valid.")
+
+
 # =========================================================================
-#  GENERIC — Secondary Databases (3 tools)
+#  GENERIC — Secondary Databases (4 tools)
 # =========================================================================
 
 
@@ -1165,6 +1249,29 @@ async def get_page(
     try:
         page = await app.client.get_page(page_id)
         return format_generic_page(page)
+    except NotionAPIError as e:
+        return _handle_api_error(e, "Check the page ID is valid.")
+
+
+@mcp.tool(
+    annotations=ToolAnnotations(readOnlyHint=True, destructiveHint=False, idempotentHint=True)
+)
+async def get_page_content(
+    page_id: Annotated[str, Field(description="Any Notion page ID.")],
+    ctx: Context = None,
+) -> dict:
+    """Get any page's properties plus its full body content as plain text.
+    Works for any page type. For notes specifically, get_note_content returns
+    the same data with note-specific formatting."""
+    app = _ctx(ctx)
+    try:
+        page_fut = app.client.get_page(page_id)
+        blocks_fut = app.client.get_blocks(page_id)
+        page, blocks = await asyncio.gather(page_fut, blocks_fut)
+
+        result = format_generic_page(page)
+        result["content"] = blocks_to_text(blocks)
+        return result
     except NotionAPIError as e:
         return _handle_api_error(e, "Check the page ID is valid.")
 

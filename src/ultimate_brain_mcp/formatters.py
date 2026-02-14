@@ -1,10 +1,12 @@
-"""Notion JSON → agent-friendly dict transforms.
+"""Notion JSON → agent-friendly dict transforms (and reverse: text → Notion blocks).
 
 Per-database formatters for the 5 primary databases (Tasks, Projects, Notes, Tags, Goals)
 and a generic formatter that auto-extracts all Notion property types.
 """
 
 from __future__ import annotations
+
+import re
 
 
 # ---------------------------------------------------------------------------
@@ -338,3 +340,161 @@ def blocks_to_text(blocks: list[dict]) -> str:
             lines.append(text)
 
     return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
+# Text → Notion blocks (inverse of blocks_to_text)
+# ---------------------------------------------------------------------------
+
+_NOTION_TEXT_LIMIT = 2000
+
+
+def _make_rich_text(text: str) -> list[dict]:
+    """Create a rich_text array, auto-chunking at 2000 chars (Notion limit)."""
+    if not text:
+        return []
+    chunks: list[dict] = []
+    for i in range(0, len(text), _NOTION_TEXT_LIMIT):
+        chunk = text[i:i + _NOTION_TEXT_LIMIT]
+        chunks.append({
+            "type": "text",
+            "text": {"content": chunk},
+            "plain_text": chunk,
+        })
+    return chunks
+
+
+def _block_paragraph(text: str) -> dict:
+    return {"object": "block", "type": "paragraph", "paragraph": {"rich_text": _make_rich_text(text)}}
+
+
+def _block_heading(text: str, level: int) -> dict:
+    btype = f"heading_{level}"
+    return {"object": "block", "type": btype, btype: {"rich_text": _make_rich_text(text)}}
+
+
+def _block_bulleted_list_item(text: str) -> dict:
+    return {"object": "block", "type": "bulleted_list_item", "bulleted_list_item": {"rich_text": _make_rich_text(text)}}
+
+
+def _block_numbered_list_item(text: str) -> dict:
+    return {"object": "block", "type": "numbered_list_item", "numbered_list_item": {"rich_text": _make_rich_text(text)}}
+
+
+def _block_to_do(text: str, checked: bool = False) -> dict:
+    return {"object": "block", "type": "to_do", "to_do": {"rich_text": _make_rich_text(text), "checked": checked}}
+
+
+def _block_code(text: str, language: str = "plain text") -> dict:
+    return {"object": "block", "type": "code", "code": {"rich_text": _make_rich_text(text), "language": language}}
+
+
+def _block_quote(text: str) -> dict:
+    return {"object": "block", "type": "quote", "quote": {"rich_text": _make_rich_text(text)}}
+
+
+def _block_divider() -> dict:
+    return {"object": "block", "type": "divider", "divider": {}}
+
+
+def text_to_blocks(text: str) -> list[dict]:
+    """Parse markdown-like text into a list of Notion block dicts.
+
+    Supported syntax:
+        # Heading 1 / ## Heading 2 / ### Heading 3
+        - bullet item
+        1. numbered item
+        - [ ] unchecked to-do / - [x] checked to-do
+        ```lang ... ```  (code block)
+        > blockquote
+        ---  (divider)
+        plain text (consecutive non-blank lines joined into one paragraph)
+    """
+    if not text or not text.strip():
+        return []
+
+    blocks: list[dict] = []
+    lines = text.split("\n")
+    i = 0
+    para_lines: list[str] = []  # accumulate consecutive plain-text lines
+
+    def _flush_para():
+        if para_lines:
+            blocks.append(_block_paragraph("\n".join(para_lines)))
+            para_lines.clear()
+
+    while i < len(lines):
+        line = lines[i]
+
+        # Code block (fenced)
+        if line.startswith("```"):
+            _flush_para()
+            lang = line[3:].strip() or "plain text"
+            code_lines: list[str] = []
+            i += 1
+            while i < len(lines) and not lines[i].startswith("```"):
+                code_lines.append(lines[i])
+                i += 1
+            blocks.append(_block_code("\n".join(code_lines), lang))
+            i += 1  # skip closing ```
+            continue
+
+        # Divider
+        if line.strip() == "---":
+            _flush_para()
+            blocks.append(_block_divider())
+            i += 1
+            continue
+
+        # Headings
+        heading_match = re.match(r"^(#{1,3})\s+(.+)$", line)
+        if heading_match:
+            _flush_para()
+            level = len(heading_match.group(1))
+            blocks.append(_block_heading(heading_match.group(2), level))
+            i += 1
+            continue
+
+        # To-do items: - [ ] or - [x]
+        todo_match = re.match(r"^-\s+\[([ xX])\]\s+(.+)$", line)
+        if todo_match:
+            _flush_para()
+            checked = todo_match.group(1).lower() == "x"
+            blocks.append(_block_to_do(todo_match.group(2), checked))
+            i += 1
+            continue
+
+        # Bulleted list item
+        if re.match(r"^-\s+(.+)$", line):
+            _flush_para()
+            blocks.append(_block_bulleted_list_item(line[2:]))
+            i += 1
+            continue
+
+        # Numbered list item
+        num_match = re.match(r"^\d+\.\s+(.+)$", line)
+        if num_match:
+            _flush_para()
+            blocks.append(_block_numbered_list_item(num_match.group(1)))
+            i += 1
+            continue
+
+        # Blockquote
+        if line.startswith("> "):
+            _flush_para()
+            blocks.append(_block_quote(line[2:]))
+            i += 1
+            continue
+
+        # Blank line → flush paragraph
+        if not line.strip():
+            _flush_para()
+            i += 1
+            continue
+
+        # Plain text → accumulate into paragraph
+        para_lines.append(line)
+        i += 1
+
+    _flush_para()
+    return blocks

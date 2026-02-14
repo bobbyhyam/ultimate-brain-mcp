@@ -66,13 +66,13 @@ def _parse_result(result):
 
 @pytest.mark.asyncio
 async def test_list_tools(server_params, _check_env):
-    """Verify all 26 tools are registered."""
+    """Verify all 28 tools are registered."""
     async with stdio_client(server_params) as (read, write):
         async with ClientSession(read, write) as session:
             await session.initialize()
             tools = await session.list_tools()
             names = [t.name for t in tools.tools]
-            assert len(names) >= 26, f"Expected 26+ tools, got {len(names)}: {names}"
+            assert len(names) >= 28, f"Expected 28+ tools, got {len(names)}: {names}"
 
             expected = [
                 "search_tasks", "get_my_day", "get_inbox_tasks",
@@ -84,8 +84,8 @@ async def test_list_tools(server_params, _check_env):
                 "search_tags", "create_tag", "update_tag",
                 "search_goals", "get_goal_detail",
                 "create_goal", "update_goal",
-                "daily_summary", "archive_item",
-                "query_database", "get_page", "update_page",
+                "daily_summary", "archive_item", "set_page_content",
+                "query_database", "get_page", "get_page_content", "update_page",
             ]
             for name in expected:
                 assert name in names, f"Tool '{name}' not found"
