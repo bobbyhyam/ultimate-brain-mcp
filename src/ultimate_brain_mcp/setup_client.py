@@ -177,7 +177,7 @@ def build_server_entry(secret: str, discovered: dict[str, str]) -> dict:
     return {
         "type": "stdio",
         "command": "uvx",
-        "args": ["ultimate-brain-mcp"],
+        "args": ["--upgrade", "ultimate-brain-mcp"],
         "env": env,
     }
 
