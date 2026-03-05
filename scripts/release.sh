@@ -77,6 +77,8 @@ if [[ "$DRY_RUN" == true ]]; then
     echo "Dry run complete — commit and tag created locally, skipping push"
 else
     git push origin main
+    echo "Waiting for GitHub to process the commit before pushing tag..."
+    sleep 3
     git push origin "$TAG"
 
     # Print GitHub Actions URL
