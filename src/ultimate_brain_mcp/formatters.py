@@ -8,6 +8,10 @@ from __future__ import annotations
 
 import re
 
+from markdown_it import MarkdownIt
+
+_md_inline = MarkdownIt().enable("strikethrough")
+
 
 # ---------------------------------------------------------------------------
 # Low-level property extractors
@@ -349,19 +353,105 @@ def blocks_to_text(blocks: list[dict]) -> str:
 _NOTION_TEXT_LIMIT = 2000
 
 
-def _make_rich_text(text: str) -> list[dict]:
-    """Create a rich_text array, auto-chunking at 2000 chars (Notion limit)."""
+def _plain_segment(content: str, annotations: dict | None = None, link_url: str | None = None) -> dict:
+    """Create a single rich_text segment with optional annotations and link."""
+    seg: dict = {
+        "type": "text",
+        "text": {"content": content},
+        "plain_text": content,
+    }
+    if link_url:
+        seg["text"]["link"] = {"url": link_url}
+    if annotations:
+        non_default = {k: v for k, v in annotations.items() if v}
+        if non_default:
+            seg["annotations"] = non_default
+    return seg
+
+
+def _walk_inline_tokens(children: list) -> list[dict]:
+    """Walk markdown-it inline token children and emit Notion rich_text segments."""
+    segments: list[dict] = []
+    state = {"bold": False, "italic": False, "strikethrough": False}
+    link_url: str | None = None
+
+    for token in children:
+        if token.type == "strong_open":
+            state["bold"] = True
+        elif token.type == "strong_close":
+            state["bold"] = False
+        elif token.type == "em_open":
+            state["italic"] = True
+        elif token.type == "em_close":
+            state["italic"] = False
+        elif token.type == "s_open":
+            state["strikethrough"] = True
+        elif token.type == "s_close":
+            state["strikethrough"] = False
+        elif token.type == "link_open":
+            href = token.attrGet("href") if hasattr(token, "attrGet") else None
+            if href is None and token.attrs:
+                href = dict(token.attrs).get("href")
+            link_url = href
+        elif token.type == "link_close":
+            link_url = None
+        elif token.type == "code_inline":
+            segments.append(_plain_segment(token.content, {"code": True}))
+        elif token.type in ("text", "softbreak"):
+            content = token.content if token.type == "text" else "\n"
+            if content:
+                annotations = {k: v for k, v in state.items() if v}
+                segments.append(_plain_segment(content, annotations, link_url))
+
+    return segments
+
+
+def _chunk_segments(segments: list[dict]) -> list[dict]:
+    """Split any segment with content > 2000 chars into sub-segments preserving annotations."""
+    result: list[dict] = []
+    for seg in segments:
+        content = seg["text"]["content"]
+        if len(content) <= _NOTION_TEXT_LIMIT:
+            result.append(seg)
+            continue
+        annotations = seg.get("annotations")
+        link = seg["text"].get("link")
+        link_url = link["url"] if link else None
+        for i in range(0, len(content), _NOTION_TEXT_LIMIT):
+            chunk = content[i:i + _NOTION_TEXT_LIMIT]
+            result.append(_plain_segment(chunk, dict(annotations) if annotations else None, link_url))
+    return result
+
+
+def _make_rich_text(text: str, *, parse_markdown: bool = True) -> list[dict]:
+    """Create a rich_text array with inline markdown formatting.
+
+    When parse_markdown=True (default), parses **bold**, *italic*, `code`,
+    ~~strikethrough~~, and [links](url) into Notion annotations.
+    When False, treats text as plain and just chunks at 2000 chars.
+    """
     if not text:
         return []
-    chunks: list[dict] = []
-    for i in range(0, len(text), _NOTION_TEXT_LIMIT):
-        chunk = text[i:i + _NOTION_TEXT_LIMIT]
-        chunks.append({
-            "type": "text",
-            "text": {"content": chunk},
-            "plain_text": chunk,
-        })
-    return chunks
+
+    if not parse_markdown:
+        chunks: list[dict] = []
+        for i in range(0, len(text), _NOTION_TEXT_LIMIT):
+            chunk = text[i:i + _NOTION_TEXT_LIMIT]
+            chunks.append(_plain_segment(chunk))
+        return chunks
+
+    tokens = _md_inline.parse(text)
+    segments: list[dict] = []
+    for token in tokens:
+        if token.type == "inline" and token.children:
+            segments.extend(_walk_inline_tokens(token.children))
+        elif token.type == "text" or (hasattr(token, "content") and token.content):
+            segments.append(_plain_segment(token.content))
+
+    if not segments:
+        return [_plain_segment(text)]
+
+    return _chunk_segments(segments)
 
 
 def _block_paragraph(text: str) -> dict:
@@ -386,7 +476,7 @@ def _block_to_do(text: str, checked: bool = False) -> dict:
 
 
 def _block_code(text: str, language: str = "plain text") -> dict:
-    return {"object": "block", "type": "code", "code": {"rich_text": _make_rich_text(text), "language": language}}
+    return {"object": "block", "type": "code", "code": {"rich_text": _make_rich_text(text, parse_markdown=False), "language": language}}
 
 
 def _block_quote(text: str) -> dict:
