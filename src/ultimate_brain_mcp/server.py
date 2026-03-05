@@ -508,13 +508,42 @@ async def search_projects(
         str | None,
         Field(description="Filter by tag page ID."),
     ] = None,
+    query: Annotated[
+        str | None,
+        Field(description="Text to search for in project names."),
+    ] = None,
+    goal_id: Annotated[
+        str | None,
+        Field(description="Filter by goal page ID."),
+    ] = None,
+    deadline_before: Annotated[
+        str | None,
+        Field(description="Target deadline on or before this date (YYYY-MM-DD)."),
+    ] = None,
+    deadline_after: Annotated[
+        str | None,
+        Field(description="Target deadline on or after this date (YYYY-MM-DD)."),
+    ] = None,
+    completed_before: Annotated[
+        str | None,
+        Field(description="Completion date on or before this date (YYYY-MM-DD). Best combined with status='Complete'."),
+    ] = None,
+    completed_after: Annotated[
+        str | None,
+        Field(description="Completion date on or after this date (YYYY-MM-DD). Best combined with status='Complete'."),
+    ] = None,
+    archived: Annotated[
+        bool | None,
+        Field(description="Filter by archived flag."),
+    ] = None,
     limit: Annotated[
         int,
         Field(description="Maximum results to return.", ge=1, le=100),
     ] = 50,
     ctx: Context = None,
 ) -> list[dict] | dict:
-    """Search projects by status or tag. Defaults to active projects (Doing + Ongoing).
+    """Search projects by name, status, tag, goal, deadline, completion date, or archived flag.
+    Defaults to active projects (Doing + Ongoing). Combine deadline_before + deadline_after for date ranges.
     For a full project breakdown with tasks, use get_project_detail instead."""
     app = _ctx(ctx)
     filters: list[dict] = []
@@ -531,11 +560,28 @@ async def search_projects(
 
     if tag_id:
         filters.append({"property": "Tag", "relation": {"contains": tag_id}})
+    if query:
+        filters.append({"property": "Name", "title": {"contains": query}})
+    if goal_id:
+        filters.append({"property": "Goal", "relation": {"contains": goal_id}})
+    if deadline_before:
+        filters.append({"property": "Target Deadline", "date": {"on_or_before": deadline_before}})
+    if deadline_after:
+        filters.append({"property": "Target Deadline", "date": {"on_or_after": deadline_after}})
+    if completed_before:
+        filters.append({"property": "Completed", "date": {"on_or_before": completed_before}})
+    if completed_after:
+        filters.append({"property": "Completed", "date": {"on_or_after": completed_after}})
+    if archived is not None:
+        filters.append({"property": "Archived", "checkbox": {"equals": archived}})
 
-    query_filter = {"and": filters} if len(filters) > 1 else filters[0]
+    query_filter = {"and": filters} if len(filters) > 1 else filters[0] if filters else None
+    sorts = [{"property": "Target Deadline", "direction": "ascending"}]
 
     try:
-        pages = await app.client.query_all(app.config.projects_ds_id, filter=query_filter)
+        pages = await app.client.query_all(
+            app.config.projects_ds_id, filter=query_filter, sorts=sorts
+        )
         return [format_project(p) for p in pages[:limit]]
     except NotionAPIError as e:
         return _handle_api_error(e)
@@ -847,15 +893,36 @@ async def search_tags(
         str | None,
         Field(description=f"Filter by PARA type. Options: {', '.join(TAG_TYPES)}."),
     ] = None,
+    query: Annotated[
+        str | None,
+        Field(description="Text to search for in tag names."),
+    ] = None,
+    parent_tag_id: Annotated[
+        str | None,
+        Field(description="Filter by parent tag page ID."),
+    ] = None,
+    favorite: Annotated[
+        bool | None,
+        Field(description="Filter by favorite flag."),
+    ] = None,
     limit: Annotated[int, Field(description="Maximum results.", ge=1, le=100)] = 100,
     ctx: Context = None,
 ) -> list[dict] | dict:
-    """Search tags by PARA type (Area, Resource, or Entity).
+    """Search tags by name, PARA type, parent tag, or favorite flag.
     Tags organize content across all databases in Ultimate Brain."""
     app = _ctx(ctx)
-    query_filter = None
+    filters: list[dict] = []
+
     if tag_type:
-        query_filter = {"property": "Type", "status": {"equals": tag_type}}
+        filters.append({"property": "Type", "status": {"equals": tag_type}})
+    if query:
+        filters.append({"property": "Name", "title": {"contains": query}})
+    if parent_tag_id:
+        filters.append({"property": "Parent Tag", "relation": {"contains": parent_tag_id}})
+    if favorite is not None:
+        filters.append({"property": "Favorite", "checkbox": {"equals": favorite}})
+
+    query_filter = {"and": filters} if len(filters) > 1 else (filters[0] if filters else None)
 
     try:
         pages = await app.client.query_all(app.config.tags_ds_id, filter=query_filter)
@@ -940,19 +1007,70 @@ async def search_goals(
         str | None,
         Field(description=f"Filter by status. Options: {', '.join(GOAL_STATUSES)}. Defaults to Active."),
     ] = None,
+    query: Annotated[
+        str | None,
+        Field(description="Text to search for in goal names."),
+    ] = None,
+    tag_id: Annotated[
+        str | None,
+        Field(description="Filter by tag page ID."),
+    ] = None,
+    project_id: Annotated[
+        str | None,
+        Field(description="Filter by linked project page ID."),
+    ] = None,
+    deadline_before: Annotated[
+        str | None,
+        Field(description="Target deadline on or before this date (YYYY-MM-DD)."),
+    ] = None,
+    deadline_after: Annotated[
+        str | None,
+        Field(description="Target deadline on or after this date (YYYY-MM-DD)."),
+    ] = None,
+    achieved_before: Annotated[
+        str | None,
+        Field(description="Achieved date on or before this date (YYYY-MM-DD). Best combined with status='Achieved'."),
+    ] = None,
+    achieved_after: Annotated[
+        str | None,
+        Field(description="Achieved date on or after this date (YYYY-MM-DD). Best combined with status='Achieved'."),
+    ] = None,
     limit: Annotated[int, Field(description="Maximum results.", ge=1, le=100)] = 50,
     ctx: Context = None,
 ) -> list[dict] | dict:
-    """Search goals by status. Defaults to Active goals.
+    """Search goals by name, status, tag, project, deadline, or achieved date.
+    Defaults to Active goals. Combine deadline_before + deadline_after for date ranges.
     For goal details with linked projects, use get_goal_detail."""
     app = _ctx(ctx)
+    filters: list[dict] = []
+
     if status:
-        query_filter = {"property": "Status", "status": {"equals": status}}
+        filters.append({"property": "Status", "status": {"equals": status}})
     else:
-        query_filter = {"property": "Status", "status": {"equals": "Active"}}
+        filters.append({"property": "Status", "status": {"equals": "Active"}})
+
+    if query:
+        filters.append({"property": "Name", "title": {"contains": query}})
+    if tag_id:
+        filters.append({"property": "Tag", "relation": {"contains": tag_id}})
+    if project_id:
+        filters.append({"property": "Projects", "relation": {"contains": project_id}})
+    if deadline_before:
+        filters.append({"property": "Target Deadline", "date": {"on_or_before": deadline_before}})
+    if deadline_after:
+        filters.append({"property": "Target Deadline", "date": {"on_or_after": deadline_after}})
+    if achieved_before:
+        filters.append({"property": "Achieved", "date": {"on_or_before": achieved_before}})
+    if achieved_after:
+        filters.append({"property": "Achieved", "date": {"on_or_after": achieved_after}})
+
+    query_filter = {"and": filters} if len(filters) > 1 else (filters[0] if filters else None)
+    sorts = [{"property": "Target Deadline", "direction": "ascending"}]
 
     try:
-        pages = await app.client.query_all(app.config.goals_ds_id, filter=query_filter)
+        pages = await app.client.query_all(
+            app.config.goals_ds_id, filter=query_filter, sorts=sorts
+        )
         return [format_goal(p) for p in pages[:limit]]
     except NotionAPIError as e:
         return _handle_api_error(e)
