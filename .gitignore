@@ -11,3 +11,4 @@ build/
 *.so
 .venv/
 venv/
+.mcp.json
