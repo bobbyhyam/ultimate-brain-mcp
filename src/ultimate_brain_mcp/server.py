@@ -175,15 +175,39 @@ async def search_tasks(
         bool | None,
         Field(description="Filter to My Day tasks only."),
     ] = None,
+    query: Annotated[
+        str | None,
+        Field(description="Text to search for in task names."),
+    ] = None,
+    due_after: Annotated[
+        str | None,
+        Field(description="Due date on or after this date (YYYY-MM-DD). Combine with due_before for a range."),
+    ] = None,
+    parent_task_id: Annotated[
+        str | None,
+        Field(description="Filter by parent task page ID (subtasks of a specific task)."),
+    ] = None,
+    label: Annotated[
+        str | None,
+        Field(description="Filter by label name (matches tasks tagged with this label)."),
+    ] = None,
+    completed_before: Annotated[
+        str | None,
+        Field(description="Completion date on or before this date (YYYY-MM-DD). Best combined with status='Done'."),
+    ] = None,
+    completed_after: Annotated[
+        str | None,
+        Field(description="Completion date on or after this date (YYYY-MM-DD). Best combined with status='Done'."),
+    ] = None,
     limit: Annotated[
         int,
         Field(description="Maximum results to return.", ge=1, le=100),
     ] = 50,
     ctx: Context = None,
 ) -> list[dict] | dict:
-    """Search tasks by status, project, priority, due date, or My Day flag.
-    Defaults to non-Done tasks. For My Day tasks specifically, use get_my_day.
-    For unprocessed tasks, use get_inbox_tasks."""
+    """Search tasks by name, status, project, priority, due date, labels, parent task, or completion date.
+    Defaults to non-Done tasks. Combine due_before + due_after for date ranges.
+    For My Day tasks specifically, use get_my_day. For unprocessed tasks, use get_inbox_tasks."""
     app = _ctx(ctx)
     filters: list[dict] = []
 
@@ -200,6 +224,18 @@ async def search_tasks(
         filters.append({"property": "Due", "date": {"on_or_before": due_before}})
     if my_day is True:
         filters.append({"property": "My Day", "checkbox": {"equals": True}})
+    if query:
+        filters.append({"property": "Name", "title": {"contains": query}})
+    if due_after:
+        filters.append({"property": "Due", "date": {"on_or_after": due_after}})
+    if parent_task_id:
+        filters.append({"property": "Parent Task", "relation": {"contains": parent_task_id}})
+    if label:
+        filters.append({"property": "Labels", "multi_select": {"contains": label}})
+    if completed_before:
+        filters.append({"property": "Completed", "date": {"on_or_before": completed_before}})
+    if completed_after:
+        filters.append({"property": "Completed", "date": {"on_or_after": completed_after}})
 
     query_filter = {"and": filters} if len(filters) > 1 else filters[0] if filters else None
     sorts = [{"property": "Due", "direction": "ascending"}]
