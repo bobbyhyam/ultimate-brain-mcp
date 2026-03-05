@@ -308,9 +308,10 @@ def format_generic_page(page: dict) -> dict:
 # ---------------------------------------------------------------------------
 
 
-def blocks_to_text(blocks: list[dict]) -> str:
+def blocks_to_text(blocks: list[dict], *, _indent: int = 0) -> str:
     """Convert Notion block children to plain text."""
     lines: list[str] = []
+    prefix = "  " * _indent
     for block in blocks:
         btype = block.get("type", "")
         bdata = block.get(btype, {})
@@ -322,26 +323,33 @@ def blocks_to_text(blocks: list[dict]) -> str:
 
         if btype.startswith("heading_"):
             level = btype[-1]
-            lines.append(f"{'#' * int(level)} {text}")
-        elif btype in ("bulleted_list_item", "numbered_list_item"):
-            lines.append(f"- {text}")
+            lines.append(f"{prefix}{'#' * int(level)} {text}")
+        elif btype == "bulleted_list_item":
+            lines.append(f"{prefix}- {text}")
+        elif btype == "numbered_list_item":
+            lines.append(f"{prefix}1. {text}")
         elif btype == "to_do":
             checked = bdata.get("checked", False)
             marker = "[x]" if checked else "[ ]"
-            lines.append(f"- {marker} {text}")
+            lines.append(f"{prefix}- {marker} {text}")
         elif btype == "code":
             lang = bdata.get("language", "")
-            lines.append(f"```{lang}\n{text}\n```")
+            lines.append(f"{prefix}```{lang}\n{text}\n```")
         elif btype == "divider":
-            lines.append("---")
+            lines.append(f"{prefix}---")
         elif btype == "toggle":
-            lines.append(f"> {text}")
+            lines.append(f"{prefix}> {text}")
         elif btype == "callout":
-            lines.append(f"> {text}")
+            lines.append(f"{prefix}> {text}")
         elif btype == "quote":
-            lines.append(f"> {text}")
+            lines.append(f"{prefix}> {text}")
         elif text:
-            lines.append(text)
+            lines.append(f"{prefix}{text}")
+
+        # Recurse into children (nested list items, etc.)
+        children = bdata.get("children", [])
+        if children:
+            lines.append(blocks_to_text(children, _indent=_indent + 1))
 
     return "\n".join(lines)
 
@@ -492,7 +500,7 @@ def text_to_blocks(text: str) -> list[dict]:
 
     Supported syntax:
         # Heading 1 / ## Heading 2 / ### Heading 3
-        - bullet item
+        - bullet item (supports nesting with 2-space indent)
         1. numbered item
         - [ ] unchecked to-do / - [x] checked to-do
         ```lang ... ```  (code block)
@@ -512,6 +520,21 @@ def text_to_blocks(text: str) -> list[dict]:
         if para_lines:
             blocks.append(_block_paragraph("\n".join(para_lines)))
             para_lines.clear()
+
+    def _collect_children(start: int) -> tuple[list[dict], int]:
+        """Collect indented child lines starting at *start* and return (child_blocks, next_i)."""
+        child_lines: list[str] = []
+        j = start
+        while j < len(lines):
+            ln = lines[j]
+            # Accept lines indented by 2+ spaces (strip exactly 2 leading spaces)
+            if ln.startswith("  ") and ln[2:].strip():
+                child_lines.append(ln[2:])
+                j += 1
+            else:
+                break
+        child_blocks = text_to_blocks("\n".join(child_lines)) if child_lines else []
+        return child_blocks, j
 
     while i < len(lines):
         line = lines[i]
@@ -550,23 +573,35 @@ def text_to_blocks(text: str) -> list[dict]:
         if todo_match:
             _flush_para()
             checked = todo_match.group(1).lower() == "x"
-            blocks.append(_block_to_do(todo_match.group(2), checked))
+            block = _block_to_do(todo_match.group(2), checked)
             i += 1
+            children, i = _collect_children(i)
+            if children:
+                block["to_do"]["children"] = children
+            blocks.append(block)
             continue
 
         # Bulleted list item
         if re.match(r"^-\s+(.+)$", line):
             _flush_para()
-            blocks.append(_block_bulleted_list_item(line[2:]))
+            block = _block_bulleted_list_item(line[2:])
             i += 1
+            children, i = _collect_children(i)
+            if children:
+                block["bulleted_list_item"]["children"] = children
+            blocks.append(block)
             continue
 
         # Numbered list item
         num_match = re.match(r"^\d+\.\s+(.+)$", line)
         if num_match:
             _flush_para()
-            blocks.append(_block_numbered_list_item(num_match.group(1)))
+            block = _block_numbered_list_item(num_match.group(1))
             i += 1
+            children, i = _collect_children(i)
+            if children:
+                block["numbered_list_item"]["children"] = children
+            blocks.append(block)
             continue
 
         # Blockquote

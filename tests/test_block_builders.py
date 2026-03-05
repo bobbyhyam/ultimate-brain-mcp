@@ -317,3 +317,63 @@ class TestInlineFormatting:
         italic_segs = [s for s in rich_text if s.get("annotations", {}).get("italic")]
         assert len(bold_segs) >= 1
         assert len(italic_segs) >= 1
+
+
+class TestNumberedListRoundTrip:
+    """Numbered lists should round-trip as numbered (not bullets)."""
+
+    def test_numbered_list_round_trip(self):
+        original = "1. First\n2. Second\n3. Third"
+        blocks = text_to_blocks(original)
+        result = blocks_to_text(blocks)
+        assert "1. First" in result
+        assert "1. Second" in result  # Notion re-numbers, we output 1. for each
+        assert "1. Third" in result
+
+    def test_numbered_vs_bullet_distinction(self):
+        blocks = text_to_blocks("- Bullet\n1. Numbered")
+        result = blocks_to_text(blocks)
+        assert "- Bullet" in result
+        assert "1. Numbered" in result
+
+
+class TestNestedLists:
+    """Indented list items should become children."""
+
+    def test_nested_bullets(self):
+        doc = "- Parent\n  - Child A\n  - Child B"
+        blocks = text_to_blocks(doc)
+        assert len(blocks) == 1
+        assert blocks[0]["type"] == "bulleted_list_item"
+        children = blocks[0]["bulleted_list_item"].get("children", [])
+        assert len(children) == 2
+        assert children[0]["type"] == "bulleted_list_item"
+        assert children[0]["bulleted_list_item"]["rich_text"][0]["text"]["content"] == "Child A"
+
+    def test_nested_numbered(self):
+        doc = "1. Parent\n  1. Sub-step A\n  2. Sub-step B"
+        blocks = text_to_blocks(doc)
+        assert len(blocks) == 1
+        children = blocks[0]["numbered_list_item"].get("children", [])
+        assert len(children) == 2
+        assert children[0]["type"] == "numbered_list_item"
+
+    def test_multiple_parents_with_children(self):
+        doc = "- A\n  - A1\n- B\n  - B1\n  - B2"
+        blocks = text_to_blocks(doc)
+        assert len(blocks) == 2
+        assert len(blocks[0]["bulleted_list_item"]["children"]) == 1
+        assert len(blocks[1]["bulleted_list_item"]["children"]) == 2
+
+    def test_nested_round_trip(self):
+        doc = "- Parent\n  - Child"
+        blocks = text_to_blocks(doc)
+        result = blocks_to_text(blocks)
+        assert "- Parent" in result
+        assert "  - Child" in result
+
+    def test_no_children_when_not_indented(self):
+        doc = "- A\n- B"
+        blocks = text_to_blocks(doc)
+        assert "children" not in blocks[0]["bulleted_list_item"]
+        assert "children" not in blocks[1]["bulleted_list_item"]

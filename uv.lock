@@ -794,7 +794,7 @@ wheels = [
 
 [[package]]
 name = "ultimate-brain-mcp"
-version = "0.3.1"
+version = "0.3.4"
 source = { editable = "." }
 dependencies = [
     { name = "httpx" },
