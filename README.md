@@ -33,7 +33,7 @@ NOTION_INTEGRATION_SECRET=secret_... uvx --from ultimate-brain-mcp ultimate-brai
 ## Tools
 
 ### Tasks (6)
-- `search_tasks` — Filter by status, project, priority, due date, My Day
+- `search_tasks` — Filter by name, status, project, priority, due date, My Day, labels, parent task, completion date
 - `create_task` — Create with name, status, due, priority, project, labels
 - `update_task` — Patch any task properties
 - `complete_task` — Mark done with recurrence handling
