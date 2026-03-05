@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from ultimate_brain_mcp.formatters import blocks_to_text, text_to_blocks
+from ultimate_brain_mcp.formatters import _make_rich_text, blocks_to_text, text_to_blocks
 
 
 class TestEmptyInput:
@@ -26,10 +26,13 @@ class TestParagraphs:
         blocks = text_to_blocks("Line one\nLine two\nLine three")
         assert len(blocks) == 1
         assert blocks[0]["type"] == "paragraph"
-        content = blocks[0]["paragraph"]["rich_text"][0]["text"]["content"]
-        assert "Line one" in content
-        assert "Line two" in content
-        assert "Line three" in content
+        # Content may be split across multiple rich_text segments (softbreaks)
+        full_text = "".join(
+            seg["text"]["content"] for seg in blocks[0]["paragraph"]["rich_text"]
+        )
+        assert "Line one" in full_text
+        assert "Line two" in full_text
+        assert "Line three" in full_text
 
     def test_blank_line_splits_paragraphs(self):
         blocks = text_to_blocks("Para one\n\nPara two")
@@ -238,3 +241,79 @@ class TestBlockObjectField:
         blocks = text_to_blocks(doc)
         for block in blocks:
             assert block.get("object") == "block", f"Missing object field on {block['type']}"
+
+
+class TestInlineFormatting:
+    """Inline markdown → Notion annotations."""
+
+    def test_bold(self):
+        segments = _make_rich_text("Hello **world**")
+        bold_segs = [s for s in segments if s.get("annotations", {}).get("bold")]
+        assert len(bold_segs) == 1
+        assert bold_segs[0]["text"]["content"] == "world"
+
+    def test_italic(self):
+        segments = _make_rich_text("Hello *world*")
+        italic_segs = [s for s in segments if s.get("annotations", {}).get("italic")]
+        assert len(italic_segs) == 1
+        assert italic_segs[0]["text"]["content"] == "world"
+
+    def test_code_inline(self):
+        segments = _make_rich_text("Use `print()` here")
+        code_segs = [s for s in segments if s.get("annotations", {}).get("code")]
+        assert len(code_segs) == 1
+        assert code_segs[0]["text"]["content"] == "print()"
+
+    def test_strikethrough(self):
+        segments = _make_rich_text("This is ~~deleted~~ text")
+        strike_segs = [s for s in segments if s.get("annotations", {}).get("strikethrough")]
+        assert len(strike_segs) == 1
+        assert strike_segs[0]["text"]["content"] == "deleted"
+
+    def test_link(self):
+        segments = _make_rich_text("Click [here](https://example.com) please")
+        link_segs = [s for s in segments if s["text"].get("link")]
+        assert len(link_segs) == 1
+        assert link_segs[0]["text"]["content"] == "here"
+        assert link_segs[0]["text"]["link"]["url"] == "https://example.com"
+
+    def test_bold_italic_nested(self):
+        segments = _make_rich_text("This is ***bold italic***")
+        bi_segs = [
+            s for s in segments
+            if s.get("annotations", {}).get("bold") and s.get("annotations", {}).get("italic")
+        ]
+        assert len(bi_segs) == 1
+        assert bi_segs[0]["text"]["content"] == "bold italic"
+
+    def test_plain_text_no_annotations(self):
+        segments = _make_rich_text("Just plain text")
+        for seg in segments:
+            assert not seg.get("annotations"), f"Unexpected annotations: {seg.get('annotations')}"
+
+    def test_code_block_no_inline_parsing(self):
+        """Code blocks should not parse inline markdown."""
+        blocks = text_to_blocks("```python\nprint('**not bold**')\n```")
+        rich_text = blocks[0]["code"]["rich_text"]
+        assert len(rich_text) == 1
+        assert rich_text[0]["text"]["content"] == "print('**not bold**')"
+        assert "annotations" not in rich_text[0]
+
+    def test_long_formatted_text_chunked(self):
+        long_bold = "**" + "A" * 3000 + "**"
+        segments = _make_rich_text(long_bold)
+        assert len(segments) == 2
+        for seg in segments:
+            assert seg.get("annotations", {}).get("bold")
+            assert len(seg["text"]["content"]) <= 2000
+
+    def test_mixed_formatting_in_list_item(self):
+        """Inline formatting should work in list items via text_to_blocks."""
+        blocks = text_to_blocks("- This has **bold** and *italic* text")
+        assert len(blocks) == 1
+        assert blocks[0]["type"] == "bulleted_list_item"
+        rich_text = blocks[0]["bulleted_list_item"]["rich_text"]
+        bold_segs = [s for s in rich_text if s.get("annotations", {}).get("bold")]
+        italic_segs = [s for s in rich_text if s.get("annotations", {}).get("italic")]
+        assert len(bold_segs) >= 1
+        assert len(italic_segs) >= 1
