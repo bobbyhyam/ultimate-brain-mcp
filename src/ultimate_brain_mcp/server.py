@@ -55,16 +55,57 @@ async def app_lifespan(server: FastMCP) -> AsyncIterator[AppContext]:
         await client.close()
 
 
-mcp = FastMCP(
-    "Ultimate Brain",
-    instructions=(
-        "Tools for managing Thomas Frank's Ultimate Brain Notion system. "
-        "Covers Tasks, Projects, Notes, Tags, and Goals using the PARA methodology. "
-        "All search tools default to showing active/non-archived items. "
-        "Use daily_summary for a quick overview of everything."
-    ),
-    lifespan=app_lifespan,
-)
+# ---------------------------------------------------------------------------
+# Deferred tool registration
+# ---------------------------------------------------------------------------
+
+_TOOLS: list[tuple[callable, dict]] = []
+
+
+def _tool(**kwargs):
+    """Decorator that collects tools for deferred registration."""
+    def decorator(fn):
+        _TOOLS.append((fn, kwargs))
+        return fn
+    return decorator
+
+
+def register_tools(mcp: FastMCP) -> None:
+    """Register all collected tools on a FastMCP instance."""
+    for fn, kwargs in _TOOLS:
+        mcp.tool(**kwargs)(fn)
+
+
+def create_mcp(*, auth=None, token_verifier=None, host="127.0.0.1", port=8000) -> FastMCP:
+    """Factory to create a configured FastMCP instance.
+
+    Args:
+        auth: Optional AuthSettings for OAuth2 protection.
+        token_verifier: Optional TokenVerifier for bearer token validation.
+        host: Bind address for HTTP transports.
+        port: Port for HTTP transports.
+    """
+    kwargs = {}
+    if auth is not None:
+        kwargs["auth"] = auth
+    if token_verifier is not None:
+        kwargs["token_verifier"] = token_verifier
+
+    server = FastMCP(
+        "Ultimate Brain",
+        instructions=(
+            "Tools for managing Thomas Frank's Ultimate Brain Notion system. "
+            "Covers Tasks, Projects, Notes, Tags, and Goals using the PARA methodology. "
+            "All search tools default to showing active/non-archived items. "
+            "Use daily_summary for a quick overview of everything."
+        ),
+        lifespan=app_lifespan,
+        host=host,
+        port=port,
+        **kwargs,
+    )
+    register_tools(server)
+    return server
 
 
 # ---------------------------------------------------------------------------
@@ -151,7 +192,7 @@ def _prop_relation(ids: list[str]) -> dict:
 # =========================================================================
 
 
-@mcp.tool(
+@_tool(
     annotations=ToolAnnotations(readOnlyHint=True, destructiveHint=False, idempotentHint=True)
 )
 async def search_tasks(
@@ -249,7 +290,7 @@ async def search_tasks(
         return _handle_api_error(e)
 
 
-@mcp.tool(
+@_tool(
     annotations=ToolAnnotations(readOnlyHint=True, destructiveHint=False, idempotentHint=True)
 )
 async def get_my_day(
@@ -274,7 +315,7 @@ async def get_my_day(
         return _handle_api_error(e)
 
 
-@mcp.tool(
+@_tool(
     annotations=ToolAnnotations(readOnlyHint=True, destructiveHint=False, idempotentHint=True)
 )
 async def get_inbox_tasks(
@@ -297,7 +338,7 @@ async def get_inbox_tasks(
         return _handle_api_error(e)
 
 
-@mcp.tool(
+@_tool(
     annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=False)
 )
 async def create_task(
@@ -368,7 +409,7 @@ async def create_task(
         return _handle_api_error(e, "Check that project/parent IDs are valid.")
 
 
-@mcp.tool(
+@_tool(
     annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=True)
 )
 async def update_task(
@@ -417,7 +458,7 @@ async def update_task(
         return _handle_api_error(e, "Use search_tasks to find valid task IDs.")
 
 
-@mcp.tool(
+@_tool(
     annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=True)
 )
 async def complete_task(
@@ -496,7 +537,7 @@ def _advance_date(current: str, recurrence: str) -> str | None:
 # =========================================================================
 
 
-@mcp.tool(
+@_tool(
     annotations=ToolAnnotations(readOnlyHint=True, destructiveHint=False, idempotentHint=True)
 )
 async def search_projects(
@@ -587,7 +628,7 @@ async def search_projects(
         return _handle_api_error(e)
 
 
-@mcp.tool(
+@_tool(
     annotations=ToolAnnotations(readOnlyHint=True, destructiveHint=False, idempotentHint=True)
 )
 async def get_project_detail(
@@ -634,7 +675,7 @@ async def get_project_detail(
         return _handle_api_error(e, "Use search_projects to find valid project IDs.")
 
 
-@mcp.tool(
+@_tool(
     annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=False)
 )
 async def create_project(
@@ -677,7 +718,7 @@ async def create_project(
         return _handle_api_error(e)
 
 
-@mcp.tool(
+@_tool(
     annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=True)
 )
 async def update_project(
@@ -724,7 +765,7 @@ async def update_project(
 # =========================================================================
 
 
-@mcp.tool(
+@_tool(
     annotations=ToolAnnotations(readOnlyHint=True, destructiveHint=False, idempotentHint=True)
 )
 async def search_notes(
@@ -770,7 +811,7 @@ async def search_notes(
         return _handle_api_error(e)
 
 
-@mcp.tool(
+@_tool(
     annotations=ToolAnnotations(readOnlyHint=True, destructiveHint=False, idempotentHint=True)
 )
 async def get_note_content(
@@ -792,7 +833,7 @@ async def get_note_content(
         return _handle_api_error(e, "Use search_notes to find valid note IDs.")
 
 
-@mcp.tool(
+@_tool(
     annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=False)
 )
 async def create_note(
@@ -838,7 +879,7 @@ async def create_note(
         return _handle_api_error(e)
 
 
-@mcp.tool(
+@_tool(
     annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=True)
 )
 async def update_note(
@@ -885,7 +926,7 @@ async def update_note(
 # =========================================================================
 
 
-@mcp.tool(
+@_tool(
     annotations=ToolAnnotations(readOnlyHint=True, destructiveHint=False, idempotentHint=True)
 )
 async def search_tags(
@@ -931,7 +972,7 @@ async def search_tags(
         return _handle_api_error(e)
 
 
-@mcp.tool(
+@_tool(
     annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=False)
 )
 async def create_tag(
@@ -958,7 +999,7 @@ async def create_tag(
         return _handle_api_error(e)
 
 
-@mcp.tool(
+@_tool(
     annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=True)
 )
 async def update_tag(
@@ -999,7 +1040,7 @@ async def update_tag(
 # =========================================================================
 
 
-@mcp.tool(
+@_tool(
     annotations=ToolAnnotations(readOnlyHint=True, destructiveHint=False, idempotentHint=True)
 )
 async def search_goals(
@@ -1076,7 +1117,7 @@ async def search_goals(
         return _handle_api_error(e)
 
 
-@mcp.tool(
+@_tool(
     annotations=ToolAnnotations(readOnlyHint=True, destructiveHint=False, idempotentHint=True)
 )
 async def get_goal_detail(
@@ -1107,7 +1148,7 @@ async def get_goal_detail(
         return _handle_api_error(e, "Use search_goals to find valid goal IDs.")
 
 
-@mcp.tool(
+@_tool(
     annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=False)
 )
 async def create_goal(
@@ -1150,7 +1191,7 @@ async def create_goal(
         return _handle_api_error(e)
 
 
-@mcp.tool(
+@_tool(
     annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=True)
 )
 async def update_goal(
@@ -1197,7 +1238,7 @@ async def update_goal(
 # =========================================================================
 
 
-@mcp.tool(
+@_tool(
     annotations=ToolAnnotations(readOnlyHint=True, destructiveHint=False, idempotentHint=True)
 )
 async def daily_summary(
@@ -1279,7 +1320,7 @@ async def daily_summary(
         return _handle_api_error(e)
 
 
-@mcp.tool(
+@_tool(
     annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=True, idempotentHint=True)
 )
 async def archive_item(
@@ -1297,7 +1338,7 @@ async def archive_item(
         return _handle_api_error(e, "Check the page ID is valid.")
 
 
-@mcp.tool(
+@_tool(
     annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=True, idempotentHint=True)
 )
 async def set_page_content(
@@ -1345,7 +1386,7 @@ async def set_page_content(
 # =========================================================================
 
 
-@mcp.tool(
+@_tool(
     annotations=ToolAnnotations(readOnlyHint=True, destructiveHint=False, idempotentHint=True)
 )
 async def query_database(
@@ -1390,7 +1431,7 @@ async def query_database(
         return _handle_api_error(e)
 
 
-@mcp.tool(
+@_tool(
     annotations=ToolAnnotations(readOnlyHint=True, destructiveHint=False, idempotentHint=True)
 )
 async def get_page(
@@ -1407,7 +1448,7 @@ async def get_page(
         return _handle_api_error(e, "Check the page ID is valid.")
 
 
-@mcp.tool(
+@_tool(
     annotations=ToolAnnotations(readOnlyHint=True, destructiveHint=False, idempotentHint=True)
 )
 async def get_page_content(
@@ -1430,7 +1471,7 @@ async def get_page_content(
         return _handle_api_error(e, "Check the page ID is valid.")
 
 
-@mcp.tool(
+@_tool(
     annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=True)
 )
 async def update_page(
@@ -1507,3 +1548,10 @@ def _coerce_property(ptype: str, value) -> dict:
         return _prop_relation([str(value)])
     else:
         raise ValueError(f"Unsupported property type: {ptype}")
+
+
+# ---------------------------------------------------------------------------
+# Default instance for backward compatibility (stdio, tests, imports)
+# ---------------------------------------------------------------------------
+
+mcp = create_mcp()

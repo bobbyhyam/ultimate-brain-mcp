@@ -1,8 +1,6 @@
 import os
 import sys
 
-from .server import mcp
-
 
 def main():
     required = [
@@ -20,4 +18,21 @@ def main():
             file=sys.stderr,
         )
         sys.exit(1)
-    mcp.run()
+
+    transport = os.environ.get("MCP_TRANSPORT", "stdio")
+
+    kwargs = {}
+    if transport != "stdio":
+        kwargs["host"] = os.environ.get("MCP_HOST", "0.0.0.0")
+        kwargs["port"] = int(os.environ.get("MCP_PORT", "8000"))
+
+        if os.environ.get("OAUTH_ISSUER_URL"):
+            from .auth import create_auth_settings, create_token_verifier
+
+            kwargs["token_verifier"] = create_token_verifier()
+            kwargs["auth"] = create_auth_settings()
+
+    from .server import create_mcp
+
+    server = create_mcp(**kwargs)
+    server.run(transport=transport)
