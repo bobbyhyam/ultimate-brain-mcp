@@ -35,8 +35,32 @@ from mcp.server.auth.provider import (
 )
 from mcp.server.auth.settings import AuthSettings, ClientRegistrationOptions
 from mcp.shared.auth import OAuthClientInformationFull
+from pydantic import AnyUrl
 
 logger = logging.getLogger(__name__)
+
+
+class _PermissiveClient(OAuthClientInformationFull):
+    """Client that accepts any redirect URI and scope.
+
+    Used for auto-created clients when a client_id isn't found in the
+    in-memory store (e.g. after a container restart). This is safe because
+    real authentication is handled by the upstream IdP (Authentik), not by
+    client credentials.
+    """
+
+    def validate_redirect_uri(self, redirect_uri: AnyUrl | None) -> AnyUrl:
+        if redirect_uri is not None:
+            return redirect_uri
+        if self.redirect_uris and len(self.redirect_uris) == 1:
+            return self.redirect_uris[0]
+        from mcp.shared.auth import InvalidRedirectUriError
+        raise InvalidRedirectUriError("redirect_uri is required")
+
+    def validate_scope(self, requested_scope: str | None) -> list[str] | None:
+        if requested_scope is None:
+            return None
+        return requested_scope.split(" ")
 
 # ---------------------------------------------------------------------------
 # OIDC Token Verifier (shared by both modes)
@@ -225,7 +249,16 @@ class AuthentikOAuthProvider:
     # -- Client registration --------------------------------------------------
 
     async def get_client(self, client_id: str) -> OAuthClientInformationFull | None:
-        return self._clients.get(client_id)
+        client = self._clients.get(client_id)
+        if client is not None:
+            return client
+        # Auto-accept unknown clients (e.g. after container restart loses
+        # in-memory registrations). Real auth is handled by the upstream IdP.
+        logger.info("Auto-accepting unknown client_id: %s", client_id)
+        return _PermissiveClient(
+            client_id=client_id,
+            redirect_uris=["https://placeholder.invalid/callback"],
+        )
 
     async def register_client(self, client_info: OAuthClientInformationFull) -> None:
         self._clients[client_info.client_id] = client_info

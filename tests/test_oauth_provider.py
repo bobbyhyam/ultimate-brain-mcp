@@ -58,9 +58,10 @@ class TestClientRegistration:
         assert result is not None
         assert result.client_id == "test-client-1"
 
-    def test_get_unknown_client(self, provider):
+    def test_get_unknown_client_auto_accepted(self, provider):
         result = asyncio.run(provider.get_client("nonexistent"))
-        assert result is None
+        assert result is not None
+        assert result.client_id == "nonexistent"
 
 
 class TestAuthorize:
