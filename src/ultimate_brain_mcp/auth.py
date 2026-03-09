@@ -258,6 +258,7 @@ class AuthentikOAuthProvider:
         return _PermissiveClient(
             client_id=client_id,
             redirect_uris=["https://placeholder.invalid/callback"],
+            token_endpoint_auth_method="none",
         )
 
     async def register_client(self, client_info: OAuthClientInformationFull) -> None:
