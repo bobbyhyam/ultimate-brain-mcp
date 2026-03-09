@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
@@ -33,6 +34,8 @@ from .formatters import (
     text_to_blocks,
 )
 from .notion_client import NotionAPIError, NotionClient
+
+logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # Lifespan context
@@ -76,12 +79,15 @@ def register_tools(mcp: FastMCP) -> None:
         mcp.tool(**kwargs)(fn)
 
 
-def create_mcp(*, auth=None, token_verifier=None, host="127.0.0.1", port=8000) -> FastMCP:
+def create_mcp(
+    *, auth=None, token_verifier=None, auth_server_provider=None, host="127.0.0.1", port=8000
+) -> FastMCP:
     """Factory to create a configured FastMCP instance.
 
     Args:
         auth: Optional AuthSettings for OAuth2 protection.
         token_verifier: Optional TokenVerifier for bearer token validation.
+        auth_server_provider: Optional OAuthAuthorizationServerProvider for full AS mode.
         host: Bind address for HTTP transports.
         port: Port for HTTP transports.
     """
@@ -90,6 +96,8 @@ def create_mcp(*, auth=None, token_verifier=None, host="127.0.0.1", port=8000) -
         kwargs["auth"] = auth
     if token_verifier is not None:
         kwargs["token_verifier"] = token_verifier
+    if auth_server_provider is not None:
+        kwargs["auth_server_provider"] = auth_server_provider
 
     server = FastMCP(
         "Ultimate Brain",
@@ -105,6 +113,27 @@ def create_mcp(*, auth=None, token_verifier=None, host="127.0.0.1", port=8000) -
         **kwargs,
     )
     register_tools(server)
+
+    # Register OAuth callback route for AS mode
+    if auth_server_provider is not None and hasattr(auth_server_provider, "handle_oauth_callback"):
+        from starlette.requests import Request
+        from starlette.responses import RedirectResponse, Response
+
+        @server.custom_route("/oauth/callback", methods=["GET"])
+        async def oauth_callback(request: Request) -> Response:
+            code = request.query_params.get("code")
+            state = request.query_params.get("state")
+            if not code or not state:
+                return Response("Missing code or state parameter", status_code=400)
+            try:
+                redirect_url = await auth_server_provider.handle_oauth_callback(code, state)
+                return RedirectResponse(url=redirect_url, status_code=302)
+            except ValueError as e:
+                return Response(str(e), status_code=400)
+            except Exception:
+                logger.exception("OAuth callback failed")
+                return Response("Internal server error", status_code=500)
+
     return server
 
 

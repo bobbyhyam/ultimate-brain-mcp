@@ -46,6 +46,33 @@ def test_create_mcp_with_auth():
     assert server._token_verifier is mock_verifier
 
 
+def test_create_mcp_with_auth_server_provider():
+    from unittest.mock import AsyncMock, MagicMock
+
+    from mcp.server.auth.settings import AuthSettings, ClientRegistrationOptions
+
+    from ultimate_brain_mcp.server import create_mcp
+
+    mock_provider = MagicMock()
+    mock_provider.handle_oauth_callback = AsyncMock()
+    auth = AuthSettings(
+        issuer_url="https://mcp.example.com",
+        resource_server_url="https://mcp.example.com",
+        client_registration_options=ClientRegistrationOptions(enabled=True),
+    )
+
+    server = create_mcp(auth=auth, auth_server_provider=mock_provider)
+    # Provider wraps itself as token verifier via ProviderTokenVerifier
+    assert server._auth_server_provider is mock_provider
+    assert server._token_verifier is not None
+
+    tools = asyncio.run(server.list_tools())
+    assert len(tools) == 28
+
+    # Custom route should be registered
+    assert any(r.path == "/oauth/callback" for r in server._custom_starlette_routes)
+
+
 def test_default_mcp_instance_exists():
     from mcp.server.fastmcp import FastMCP
 
