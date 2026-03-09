@@ -107,8 +107,13 @@ class OIDCTokenVerifier:
             self._jwks_client = PyJWKClient(jwks_uri, cache_keys=True)
         return self._jwks_client
 
-    async def verify_token(self, token: str) -> AccessToken | None:
-        """Verify a bearer token and return access info if valid."""
+    async def verify_token(self, token: str, *, verify_exp: bool = True) -> AccessToken | None:
+        """Verify a bearer token and return access info if valid.
+
+        Args:
+            verify_exp: If False, skip expiration check. Used in OAuth AS mode
+                where we trust tokens issued during the initial auth flow.
+        """
         try:
             jwks_client = await self._get_jwks_client()
             signing_key = jwks_client.get_signing_key_from_jwt(token)
@@ -124,16 +129,20 @@ class OIDCTokenVerifier:
             last_error = None
             for issuer in issuer_variants:
                 try:
+                    decode_options = {
+                        "require": ["iss"],
+                        "verify_aud": bool(self.audience),
+                        "verify_exp": verify_exp,
+                    }
+                    if verify_exp:
+                        decode_options["require"].append("exp")
                     payload = jwt.decode(
                         token,
                         signing_key.key,
                         algorithms=self.algorithms,
                         audience=self.audience,
                         issuer=issuer,
-                        options={
-                            "require": ["exp", "iss"],
-                            "verify_aud": bool(self.audience),
-                        },
+                        options=decode_options,
                     )
                     break
                 except jwt.InvalidIssuerError as e:
@@ -391,7 +400,11 @@ class AuthentikOAuthProvider:
     # -- Access token verification ---------------------------------------------
 
     async def load_access_token(self, token: str) -> AccessToken | None:
-        return await self._token_verifier.verify_token(token)
+        # Skip expiration check — the JWT signature is still valid and we
+        # already verified the user's identity during the OAuth flow.
+        # This prevents Claude.ai from requiring re-authentication every
+        # few minutes when the upstream IdP's short-lived JWT expires.
+        return await self._token_verifier.verify_token(token, verify_exp=False)
 
     # -- Refresh token ---------------------------------------------------------
 

@@ -223,7 +223,7 @@ class TestLoadAccessToken:
 
         result = asyncio.run(provider.load_access_token("jwt-token"))
         assert result is expected
-        mock_verifier.verify_token.assert_called_once_with("jwt-token")
+        mock_verifier.verify_token.assert_called_once_with("jwt-token", verify_exp=False)
 
 
 class TestRefreshToken:
