@@ -794,13 +794,18 @@ wheels = [
 
 [[package]]
 name = "ultimate-brain-mcp"
-version = "0.3.4"
+version = "0.3.5"
 source = { editable = "." }
 dependencies = [
     { name = "httpx" },
     { name = "markdown-it-py" },
     { name = "mcp", extra = ["cli"] },
     { name = "pydantic" },
+]
+
+[package.optional-dependencies]
+remote = [
+    { name = "pyjwt", extra = ["crypto"] },
 ]
 
 [package.dev-dependencies]
@@ -816,7 +821,9 @@ requires-dist = [
     { name = "markdown-it-py", specifier = ">=3.0" },
     { name = "mcp", extras = ["cli"], specifier = ">=1.26,<2" },
     { name = "pydantic", specifier = ">=2.12" },
+    { name = "pyjwt", extras = ["crypto"], marker = "extra == 'remote'", specifier = ">=2.8" },
 ]
+provides-extras = ["remote"]
 
 [package.metadata.requires-dev]
 dev = [

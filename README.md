@@ -72,6 +72,60 @@ NOTION_INTEGRATION_SECRET=secret_... uvx --from ultimate-brain-mcp ultimate-brai
 - `get_page` — Fetch any page by ID
 - `update_page` — Update any page properties
 
+## Remote Server (Docker)
+
+Run the MCP server over HTTP using Docker Compose, as an alternative to the default stdio transport.
+
+### Quick start
+
+1. Copy `.env.example` to `.env` and fill in your Notion credentials (same as the stdio setup).
+
+2. Start the server:
+
+```bash
+docker compose up -d
+```
+
+The server will be available at `http://localhost:8000/mcp` using the `streamable-http` transport.
+
+### With SSO authentication
+
+Protect the remote server with your existing SSO provider. When configured, users connecting to the MCP server URL are automatically redirected to your provider's login page in their browser — no manual token management required.
+
+Add these to your `.env` or `docker-compose.yml` environment:
+
+```bash
+OAUTH_ISSUER_URL=https://your-provider.example.com   # OIDC issuer (must serve /.well-known/openid-configuration)
+OAUTH_CLIENT_ID=your-api-identifier                    # Expected audience/client_id claim
+OAUTH_REQUIRED_SCOPES=read,write                      # Optional comma-separated required scopes
+```
+
+Works with any OIDC provider (Auth0, Authentik, Keycloak, etc.). The flow:
+
+1. User's MCP client connects to the server URL
+2. Server responds with the SSO provider's metadata
+3. Client opens the provider's login page in the user's browser
+4. User logs in via SSO
+5. Client is authenticated — no further action needed
+
+### Without Docker
+
+```bash
+pip install 'ultimate-brain-mcp[remote]'
+MCP_TRANSPORT=streamable-http ultimate-brain-mcp
+```
+
+### Configuration
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `MCP_TRANSPORT` | `stdio` | Transport mode: `stdio`, `streamable-http`, or `sse` |
+| `MCP_HOST` | `0.0.0.0` | Bind address for HTTP transports |
+| `MCP_PORT` | `8000` | Port for HTTP transports |
+| `OAUTH_ISSUER_URL` | — | OIDC provider URL (enables SSO login when set) |
+| `OAUTH_CLIENT_ID` | — | Expected audience/client_id claim from the provider |
+| `OAUTH_REQUIRED_SCOPES` | — | Comma-separated scopes users must have |
+
 ## Development
 
 ```bash
