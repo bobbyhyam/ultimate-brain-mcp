@@ -66,7 +66,10 @@ fi
 echo "Bumping $CURRENT_VERSION → $NEW_VERSION"
 
 # --- Update pyproject.toml ---
-sed -i '' "s/^version = \"${CURRENT_VERSION}\"/version = \"${NEW_VERSION}\"/" "$PYPROJECT"
+# Portable in-place edit (BSD sed needs `-i ''`; GNU sed treats that as an
+# empty script). Use a temp file instead.
+sed "s/^version = \"${CURRENT_VERSION}\"/version = \"${NEW_VERSION}\"/" "$PYPROJECT" > "${PYPROJECT}.tmp"
+mv "${PYPROJECT}.tmp" "$PYPROJECT"
 
 # --- Git operations ---
 git add -A
