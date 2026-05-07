@@ -32,7 +32,12 @@ from .formatters import (
     format_task,
     text_to_blocks,
 )
-from .notion_client import NotionAPIError, NotionClient
+from .notion_client import NotionAPIError, NotionClient, PartialWriteError
+
+# Cap concurrent block deletes during set_page_content replace mode. Notion
+# rate-limits at ~3 req/sec; the per-client limiter already serialises calls,
+# but capping concurrency here also prevents thousands of pending coroutines.
+_DELETE_CONCURRENCY = 5
 
 # ---------------------------------------------------------------------------
 # Lifespan context
@@ -95,7 +100,27 @@ def _handle_api_error(e: NotionAPIError, hint: str = "") -> dict:
         msg = "Permission denied. Make sure the page is shared with the integration."
     else:
         msg = f"Notion API error ({e.status}): {e}"
-    return _error(msg)
+    err: dict = {"error": msg}
+    if isinstance(e, PartialWriteError):
+        err["partial_write"] = {
+            "blocks_written": e.written,
+            "blocks_remaining": e.remaining,
+            "page_id": e.page_id,
+        }
+    return err
+
+
+async def _bounded_gather(
+    coros: list, *, limit: int = _DELETE_CONCURRENCY
+) -> None:
+    """Run *coros* with at most *limit* concurrent in flight."""
+    sem = asyncio.Semaphore(limit)
+
+    async def _run(coro):
+        async with sem:
+            await coro
+
+    await asyncio.gather(*(_run(c) for c in coros))
 
 
 # ---------------------------------------------------------------------------
@@ -782,7 +807,7 @@ async def get_note_content(
     app = _ctx(ctx)
     try:
         page_fut = app.client.get_page(note_id)
-        blocks_fut = app.client.get_blocks(note_id)
+        blocks_fut = app.client.get_blocks(note_id, recursive=True)
         page, blocks = await asyncio.gather(page_fut, blocks_fut)
 
         result = format_note(page)
@@ -1323,19 +1348,25 @@ async def set_page_content(
     new_blocks = text_to_blocks(content)
 
     try:
+        deleted = 0
         if mode == "replace":
-            # Fetch existing blocks and delete them all
             existing = await app.client.get_blocks(page_id)
             if existing:
-                await asyncio.gather(
-                    *(app.client.delete_block(b["id"]) for b in existing)
+                await _bounded_gather(
+                    [app.client.delete_block(b["id"]) for b in existing]
                 )
+                deleted = len(existing)
 
-        # Append new blocks (if any)
         if new_blocks:
             await app.client.append_blocks(page_id, new_blocks)
 
-        return {"ok": True, "page_id": page_id, "mode": mode, "blocks_written": len(new_blocks)}
+        return {
+            "ok": True,
+            "page_id": page_id,
+            "mode": mode,
+            "blocks_written": len(new_blocks),
+            "blocks_deleted": deleted,
+        }
     except NotionAPIError as e:
         return _handle_api_error(e, "Check the page ID is valid.")
 
@@ -1420,7 +1451,7 @@ async def get_page_content(
     app = _ctx(ctx)
     try:
         page_fut = app.client.get_page(page_id)
-        blocks_fut = app.client.get_blocks(page_id)
+        blocks_fut = app.client.get_blocks(page_id, recursive=True)
         page, blocks = await asyncio.gather(page_fut, blocks_fut)
 
         result = format_generic_page(page)
