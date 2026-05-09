@@ -1,6 +1,6 @@
 # MCP Server for Ultimate Brain
 
-An MCP server for managing Thomas Frank's Ultimate Brain Notion system. Provides 26 workflow-oriented tools for Tasks, Projects, Notes, Tags, and Goals using the PARA methodology.
+An MCP server for managing Thomas Frank's Ultimate Brain Notion system. Provides 30 workflow-oriented tools for Tasks, Projects, Notes, Tags, and Goals using the PARA methodology, plus a `daily_review_snapshot` consolidator that returns everything a daily review needs in one call.
 
 ## Setup
 
@@ -33,9 +33,9 @@ NOTION_INTEGRATION_SECRET=secret_... uvx --from ultimate-brain-mcp ultimate-brai
 ## Tools
 
 ### Tasks (6)
-- `search_tasks` — Filter by name, status, project, priority, due date, My Day, labels, parent task, completion date
-- `create_task` — Create with name, status, due, priority, project, labels
-- `update_task` — Patch any task properties
+- `search_tasks` — Filter by name, status, project, priority, due date (`due_on` for a single day), My Day, labels, parent task, completion date
+- `create_task` — Create with name, status, due, priority, project, labels, tag_ids, location
+- `update_task` — Patch any task properties (incl. tag_ids and location)
 - `complete_task` — Mark done with recurrence handling
 - `get_my_day` — My Day tasks sorted by priority
 - `get_inbox_tasks` — Unprocessed tasks needing triage
@@ -63,14 +63,31 @@ NOTION_INTEGRATION_SECRET=secret_... uvx --from ultimate-brain-mcp ultimate-brai
 - `create_goal` — Create with name, status, deadline
 - `update_goal` — Patch goal properties
 
-### Cross-Cutting (2)
-- `daily_summary` — My Day, overdue, inbox, active projects/goals
+### Cross-Cutting (3)
+- `daily_summary` — My Day, overdue, inbox, active projects/goals (counts only)
 - `archive_item` — Archive any UB item
+- `set_page_content` — Replace or append page body content (markdown → blocks)
 
-### Generic (3)
+### Workflow Consolidators (2)
+- `daily_review_snapshot` — One call returns current time + IANA timezone, all five daily-review buckets (completed today, overdue or due today, due tomorrow, on My Day, inbox), the deduplicated outstanding union, project + area-tag lookup tables, and the live Tasks schema (Location property type, valid options, Labels options). Replaces ~7 separate read calls.
+- `bulk_update_tasks` — Apply multiple task patches concurrently with per-row results. Never raises on a single failure — surfaces each failed row through the results list so the caller can retry or skip.
+
+### Generic (4)
 - `query_database` — Query any secondary database
 - `get_page` — Fetch any page by ID
+- `get_page_content` — Page properties plus body as plain text
 - `update_page` — Update any page properties
+
+## Configuration
+
+Set these in `.env` (or pass via the MCP client config):
+
+| Var | Required | Purpose |
+|-----|----------|---------|
+| `NOTION_INTEGRATION_SECRET` | yes | Notion integration token |
+| `UB_TASKS_DS_ID`, `UB_PROJECTS_DS_ID`, `UB_NOTES_DS_ID`, `UB_TAGS_DS_ID`, `UB_GOALS_DS_ID` | yes | Primary data source IDs |
+| `UB_TIMEZONE` | optional | IANA name (e.g. `Europe/London`). Used by `daily_review_snapshot` to resolve `now`/`today`/`tomorrow`. Falls back to `TZ`, then `UTC`. |
+| `UB_*_DS_ID` (Work Sessions, Books, etc.) | optional | Secondary data sources surfaced via `query_database` |
 
 ## Development
 

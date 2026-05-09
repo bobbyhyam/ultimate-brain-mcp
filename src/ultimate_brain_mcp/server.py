@@ -1,4 +1,4 @@
-"""FastMCP server with 28 tools for Thomas Frank's Ultimate Brain."""
+"""FastMCP server with 30 tools for Thomas Frank's Ultimate Brain."""
 
 from __future__ import annotations
 
@@ -9,10 +9,11 @@ from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
 from typing import Annotated, Literal
+from zoneinfo import ZoneInfo
 
 from mcp.server.fastmcp import Context, FastMCP
 from mcp.types import ToolAnnotations
-from pydantic import Field
+from pydantic import BaseModel, Field
 
 from .config import (
     GOAL_STATUSES,
@@ -23,6 +24,7 @@ from .config import (
     TASK_PRIORITIES,
     TASK_STATUSES,
     UBConfig,
+    extract_property_metadata,
     extract_select_options,
 )
 from .formatters import (
@@ -42,9 +44,35 @@ from .notion_client import NotionAPIError, NotionClient, PartialWriteError
 # but capping concurrency here also prevents thousands of pending coroutines.
 _DELETE_CONCURRENCY = 5
 
+# Cap concurrent in-flight task patches during bulk_update_tasks. The
+# per-client rate limiter already serialises the actual HTTP calls — this
+# bound just stops thousands of pending coroutines from being scheduled at
+# once on a very large batch.
+_BULK_UPDATE_CONCURRENCY = 10
+
+# Default per-bucket cap on daily_review_snapshot. Bobby's task list won't
+# overshoot this in practice, but it bounds the worst-case payload size on a
+# very large workspace and surfaces via the per-bucket truncated flag.
+_SNAPSHOT_BUCKET_CAP = 100
+
 # ---------------------------------------------------------------------------
 # Lifespan context
 # ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class TasksSchema:
+    """Live introspection of the Tasks data source — used to construct the
+    right Notion property payload for the optional `location` parameter on
+    create_task / update_task / bulk_update_tasks, and surfaced verbatim in
+    daily_review_snapshot.task_schema so the agent can constrain proposals.
+    """
+
+    has_location_property: bool = False
+    location_property_name: str | None = None
+    location_property_type: str | None = None  # 'select' | 'multi_select' | 'status'
+    location_options: tuple[str, ...] = ()
+    labels_options: tuple[str, ...] = ()
 
 
 @dataclass
@@ -57,6 +85,10 @@ class AppContext:
     # "discovered" if populated from the live Notion schema, "fallback" if
     # discovery failed and we fell back to config.NOTE_TYPES.
     note_types_source: Literal["discovered", "fallback"] = "fallback"
+    # Live Tasks property schema. Always present; an empty/default value
+    # means discovery failed and the location parameter on tools will no-op
+    # with a `_warning` field in results.
+    tasks_schema: TasksSchema = field(default_factory=TasksSchema)
 
 
 @asynccontextmanager
@@ -64,12 +96,14 @@ async def app_lifespan(server: FastMCP) -> AsyncIterator[AppContext]:
     config = UBConfig.from_env()
     client = NotionClient(config.notion_secret)
     note_types, note_types_source = await _discover_note_types(client, config)
+    tasks_schema = await _discover_tasks_schema(client, config)
     try:
         yield AppContext(
             client=client,
             config=config,
             note_types=note_types,
             note_types_source=note_types_source,
+            tasks_schema=tasks_schema,
         )
     finally:
         await client.close()
@@ -105,13 +139,52 @@ async def _discover_note_types(
     return options, "discovered"
 
 
+async def _discover_tasks_schema(
+    client: NotionClient, config: UBConfig
+) -> TasksSchema:
+    """Introspect the Tasks data source for Location + Labels metadata.
+
+    Only inspects properties relevant to the workflows that need this
+    metadata — the snapshot exposes location + labels options to the agent so
+    it can propose values from the live, valid set.
+
+    Falls back to a default ``TasksSchema()`` (has_location_property=False,
+    empty labels_options) on any error. The location parameter on writer
+    tools no-ops with a ``_warning`` field when the schema is empty.
+    """
+    try:
+        schema = await client.get_data_source(config.tasks_ds_id)
+    except Exception as e:  # noqa: BLE001 — discovery is best-effort
+        print(
+            f"[ultimate-brain-mcp] Tasks schema discovery failed ({e!r}); "
+            f"location parameter will no-op for this session.",
+            file=sys.stderr,
+        )
+        return TasksSchema()
+
+    location_meta = extract_property_metadata(schema, "Location")
+    labels_meta = extract_property_metadata(schema, "Labels")
+    return TasksSchema(
+        has_location_property=bool(location_meta.get("exists")),
+        location_property_name=location_meta.get("name") if location_meta.get("exists") else None,
+        location_property_type=location_meta.get("type") if location_meta.get("exists") else None,
+        location_options=tuple(location_meta.get("options", []) or ()),
+        labels_options=tuple(labels_meta.get("options", []) or ()),
+    )
+
+
 mcp = FastMCP(
     "Ultimate Brain",
     instructions=(
         "Tools for managing Thomas Frank's Ultimate Brain Notion system. "
         "Covers Tasks, Projects, Notes, Tags, and Goals using the PARA methodology. "
         "All search tools default to showing active/non-archived items. "
-        "Use daily_summary for a quick overview of everything."
+        "Use daily_summary for a quick count-only overview. "
+        "For a full daily review (per-task details across completed / overdue / "
+        "due-tomorrow / on-My-Day / inbox), call daily_review_snapshot — one "
+        "call returns everything plus the project and area-tag lookup tables. "
+        "For batch task updates (≥3 tasks), call bulk_update_tasks instead of "
+        "looping update_task — single round-trip with per-row results."
     ),
     lifespan=app_lifespan,
 )
@@ -233,6 +306,40 @@ def _prop_relation(ids: list[str]) -> dict:
     return {"relation": [{"id": i} for i in ids]}
 
 
+def _build_location_payload(
+    schema: TasksSchema, value: str
+) -> tuple[dict | None, str | None]:
+    """Construct the Notion property payload for the ``location`` parameter.
+
+    Returns ``(payload, warning)``:
+
+    - ``(payload_dict, None)`` when the Tasks data source has a Location
+      property. The payload shape matches the discovered property type
+      (``select``, ``status``, or ``multi_select``). Caller assigns it
+      under ``schema.location_property_name``.
+    - ``(None, "<actionable message>")`` when no Location property exists.
+      Caller surfaces the warning on the result so the agent learns where
+      to look (typically the snapshot's ``task_schema.has_location_property``).
+    """
+    if not schema.has_location_property or not schema.location_property_type:
+        return None, (
+            "location ignored: Tasks has no Location property. "
+            "Check daily_review_snapshot.task_schema.has_location_property; "
+            "if locations live in Labels, pass them via the labels parameter instead."
+        )
+    ptype = schema.location_property_type
+    if ptype == "select":
+        return _prop_select(value), None
+    if ptype == "status":
+        return _prop_status(value), None
+    if ptype == "multi_select":
+        return _prop_multi_select([value]), None
+    return None, (
+        f"location ignored: unsupported Location property type {ptype!r}. "
+        f"Supported types: select, status, multi_select."
+    )
+
+
 # =========================================================================
 #  TASKS (6 tools)
 # =========================================================================
@@ -256,7 +363,7 @@ async def search_tasks(
     ] = None,
     due_before: Annotated[
         str | None,
-        Field(description="Due date on or before this date (YYYY-MM-DD)."),
+        Field(description="Due date on or before this date (YYYY-MM-DD), e.g. '2026-05-09'."),
     ] = None,
     my_day: Annotated[
         bool | None,
@@ -269,6 +376,13 @@ async def search_tasks(
     due_after: Annotated[
         str | None,
         Field(description="Due date on or after this date (YYYY-MM-DD). Combine with due_before for a range."),
+    ] = None,
+    due_on: Annotated[
+        str | None,
+        Field(description=(
+            "Due date equals this single day (YYYY-MM-DD). Mutually exclusive with "
+            "due_before and due_after — use those for ranges, this for a single day."
+        )),
     ] = None,
     parent_task_id: Annotated[
         str | None,
@@ -293,9 +407,15 @@ async def search_tasks(
     ctx: Context = None,
 ) -> list[dict] | dict:
     """Search tasks by name, status, project, priority, due date, labels, parent task, or completion date.
-    Defaults to non-Done tasks. Combine due_before + due_after for date ranges.
-    For My Day tasks specifically, use get_my_day. For unprocessed tasks, use get_inbox_tasks."""
+    Defaults to non-Done tasks. Combine due_before + due_after for date ranges, or due_on for a single day.
+    For My Day tasks specifically, use get_my_day. For unprocessed tasks, use get_inbox_tasks.
+    For a full daily-review payload (multiple buckets in one call), use daily_review_snapshot."""
     app = _ctx(ctx)
+    if due_on is not None and (due_before is not None or due_after is not None):
+        return _error(
+            "due_on cannot combine with due_before or due_after. "
+            "Use due_on for a single day, or the pair for a range."
+        )
     filters: list[dict] = []
 
     if status:
@@ -315,6 +435,8 @@ async def search_tasks(
         filters.append({"property": "Name", "title": {"contains": query}})
     if due_after:
         filters.append({"property": "Due", "date": {"on_or_after": due_after}})
+    if due_on:
+        filters.append({"property": "Due", "date": {"equals": due_on}})
     if parent_task_id:
         filters.append({"property": "Parent Task", "relation": {"contains": parent_task_id}})
     if label:
@@ -395,7 +517,7 @@ async def create_task(
     ] = None,
     due: Annotated[
         str | None,
-        Field(description="Due date in YYYY-MM-DD format."),
+        Field(description="Due date in YYYY-MM-DD format, e.g. '2026-05-09'."),
     ] = None,
     priority: Annotated[
         str | None,
@@ -417,6 +539,22 @@ async def create_task(
         str | None,
         Field(description="Parent task page ID (for sub-tasks)."),
     ] = None,
+    tag_ids: Annotated[
+        list[str] | None,
+        Field(description=(
+            "Tag page IDs to link via the Tag relation (PARA Area / Resource / Entity). "
+            "Use search_tags to find IDs. Distinct from labels (multi-select strings)."
+        )),
+    ] = None,
+    location: Annotated[
+        str | None,
+        Field(description=(
+            "Sets the Tasks Location property. Auto-detects select / multi_select / status type. "
+            "Only valid when Tasks has a Location property — check "
+            "daily_review_snapshot.task_schema.has_location_property first. "
+            "If location lives in Labels in this workspace, pass it via labels=[...] instead."
+        )),
+    ] = None,
     content: Annotated[
         str | None,
         Field(description=(
@@ -427,9 +565,14 @@ async def create_task(
     ] = None,
     ctx: Context = None,
 ) -> dict:
-    """Create a new task. Only name is required. Use search_projects to find project IDs."""
+    """Create a new task. Only name is required. Use search_projects to find project IDs.
+
+    For batches of 3+ task creations or updates, prefer bulk_update_tasks (updates only).
+    Pure creates still go through this tool one at a time.
+    """
     app = _ctx(ctx)
     props: dict = {"Name": _prop_title(name)}
+    location_warning: str | None = None
 
     if status:
         props["Status"] = _prop_status(status)
@@ -445,12 +588,23 @@ async def create_task(
         props["My Day"] = _prop_checkbox(True)
     if parent_task_id:
         props["Parent Task"] = _prop_relation([parent_task_id])
+    if tag_ids:
+        props["Tag"] = _prop_relation(tag_ids)
+    if location is not None:
+        payload, warning = _build_location_payload(app.tasks_schema, location)
+        if payload is not None and app.tasks_schema.location_property_name:
+            props[app.tasks_schema.location_property_name] = payload
+        if warning:
+            location_warning = warning
 
     children = text_to_blocks(content) if content else None
 
     try:
         page = await app.client.create_page(app.config.tasks_ds_id, props, children=children)
-        return format_task(page)
+        result = format_task(page)
+        if location_warning:
+            result["_warning"] = location_warning
+        return result
     except NotionAPIError as e:
         return _handle_api_error(e, "Check that project/parent IDs are valid.")
 
@@ -465,7 +619,10 @@ async def update_task(
         str | None,
         Field(description=f"New status. Options: {', '.join(TASK_STATUSES)}."),
     ] = None,
-    due: Annotated[str | None, Field(description="New due date (YYYY-MM-DD).")] = None,
+    due: Annotated[
+        str | None,
+        Field(description="New due date in YYYY-MM-DD format, e.g. '2026-05-09'."),
+    ] = None,
     priority: Annotated[
         str | None,
         Field(description=f"New priority. Options: {', '.join(TASK_PRIORITIES)}."),
@@ -473,12 +630,33 @@ async def update_task(
     project_id: Annotated[str | None, Field(description="New project page ID.")] = None,
     labels: Annotated[list[str] | None, Field(description="New labels (replaces existing).")] = None,
     my_day: Annotated[bool | None, Field(description="Set My Day flag.")] = None,
+    tag_ids: Annotated[
+        list[str] | None,
+        Field(description=(
+            "New Tag relation IDs (replaces existing). Use search_tags to find IDs. "
+            "Distinct from labels (multi-select strings)."
+        )),
+    ] = None,
+    location: Annotated[
+        str | None,
+        Field(description=(
+            "Sets the Tasks Location property. Auto-detects select / multi_select / status type. "
+            "Only valid when Tasks has a Location property — check "
+            "daily_review_snapshot.task_schema.has_location_property first. "
+            "If location lives in Labels in this workspace, pass it via labels=[...] instead."
+        )),
+    ] = None,
     ctx: Context = None,
 ) -> dict:
     """Update any task properties. Only provided fields are changed.
-    Use search_tasks to find task IDs. For completing tasks, use complete_task instead."""
+    Use search_tasks to find task IDs. For completing tasks, use complete_task instead.
+
+    For batch updates of 3+ tasks, use bulk_update_tasks instead — single round-trip
+    with per-row results vs N separate calls.
+    """
     app = _ctx(ctx)
     props: dict = {}
+    location_warning: str | None = None
     if name is not None:
         props["Name"] = _prop_title(name)
     if status is not None:
@@ -493,13 +671,24 @@ async def update_task(
         props["Labels"] = _prop_multi_select(labels)
     if my_day is not None:
         props["My Day"] = _prop_checkbox(my_day)
+    if tag_ids is not None:
+        props["Tag"] = _prop_relation(tag_ids)
+    if location is not None:
+        payload, warning = _build_location_payload(app.tasks_schema, location)
+        if payload is not None and app.tasks_schema.location_property_name:
+            props[app.tasks_schema.location_property_name] = payload
+        if warning:
+            location_warning = warning
 
     if not props:
         return _error("No properties to update. Provide at least one field.")
 
     try:
         page = await app.client.update_page(task_id, props)
-        return format_task(page)
+        result = format_task(page)
+        if location_warning:
+            result["_warning"] = location_warning
+        return result
     except NotionAPIError as e:
         return _handle_api_error(e, "Use search_tasks to find valid task IDs.")
 
@@ -1437,6 +1626,330 @@ async def set_page_content(
         }
     except NotionAPIError as e:
         return _handle_api_error(e, "Check the page ID is valid.")
+
+
+# =========================================================================
+#  WORKFLOW CONSOLIDATORS (2 tools)
+# =========================================================================
+
+
+@mcp.tool(
+    annotations=ToolAnnotations(readOnlyHint=True, destructiveHint=False, idempotentHint=True)
+)
+async def daily_review_snapshot(
+    inbox_limit: Annotated[
+        int,
+        Field(description="Maximum inbox tasks to return.", ge=1, le=200),
+    ] = _SNAPSHOT_BUCKET_CAP,
+    ctx: Context = None,
+) -> dict:
+    """Get a complete daily-review snapshot in one call: current time, all five
+    task buckets needed for review, the deduplicated outstanding set, project and
+    area-tag lookup tables, and the Tasks data source schema for location handling.
+
+    Use this at the START of a daily review — replaces 7 separate read calls
+    (search_tasks ×4, get_inbox_tasks, search_projects, search_tags) plus the
+    get_page sample needed to discover the Location property.
+
+    Returns:
+      now              — ISO8601 with offset, e.g. '2026-05-09T17:21:33+01:00'
+      timezone         — IANA name, e.g. 'Europe/London'
+      buckets:
+        completed_today        — tasks marked Done with completion_date = today
+        overdue_or_due_today   — non-Done tasks with due ≤ today
+        due_tomorrow           — non-Done tasks due exactly tomorrow
+        on_my_day              — non-Done tasks with My Day flag set (any due date)
+        inbox                  — non-Done tasks with status To Do, no project, no due
+      outstanding      — deduplicated union of overdue_or_due_today ∪ on_my_day
+      lookups:
+        projects       — {id → {name, status}} for active projects (Doing + Ongoing)
+        area_tags      — {id → {name}} for tags with type=Area
+      task_schema:
+        has_location_property      — bool
+        location_property_name     — string or null
+        location_property_type     — 'select' | 'multi_select' | 'status' | null
+        location_options           — string[] of valid values
+        labels_options             — string[] of valid Labels multi_select values
+      truncated        — {bucket_name → bool} flagging buckets that hit their cap
+
+    For just counts (no per-task details), use daily_summary instead — much smaller
+    response. For a single task's full content, use get_page or get_page_content.
+    """
+    app = _ctx(ctx)
+    tz = ZoneInfo(app.config.timezone)
+    now_dt = datetime.now(tz)
+    today = now_dt.date().isoformat()
+    tomorrow = (now_dt.date() + timedelta(days=1)).isoformat()
+
+    # Build filters once
+    not_done = {"property": "Status", "status": {"does_not_equal": "Done"}}
+    completed_today_filter = {
+        "and": [
+            {"property": "Status", "status": {"equals": "Done"}},
+            {"property": "Completed", "date": {"on_or_after": today}},
+            {"property": "Completed", "date": {"on_or_before": today}},
+        ]
+    }
+    overdue_or_today_filter = {
+        "and": [not_done, {"property": "Due", "date": {"on_or_before": today}}]
+    }
+    due_tomorrow_filter = {
+        "and": [not_done, {"property": "Due", "date": {"equals": tomorrow}}]
+    }
+    on_my_day_filter = {
+        "and": [not_done, {"property": "My Day", "checkbox": {"equals": True}}]
+    }
+    inbox_filter = {
+        "and": [
+            {"property": "Status", "status": {"equals": "To Do"}},
+            {"property": "Project", "relation": {"is_empty": True}},
+            {"property": "Due", "date": {"is_empty": True}},
+        ]
+    }
+    active_projects_filter = {
+        "or": [
+            {"property": "Status", "status": {"equals": "Doing"}},
+            {"property": "Status", "status": {"equals": "Ongoing"}},
+        ]
+    }
+    area_tags_filter = {"property": "Type", "status": {"equals": "Area"}}
+
+    try:
+        (
+            completed_pages,
+            overdue_pages,
+            tomorrow_pages,
+            my_day_pages,
+            inbox_pages,
+            project_pages,
+            area_tag_pages,
+        ) = await asyncio.gather(
+            app.client.query_all(app.config.tasks_ds_id, filter=completed_today_filter),
+            app.client.query_all(app.config.tasks_ds_id, filter=overdue_or_today_filter),
+            app.client.query_all(app.config.tasks_ds_id, filter=due_tomorrow_filter),
+            app.client.query_all(app.config.tasks_ds_id, filter=on_my_day_filter),
+            app.client.query_all(app.config.tasks_ds_id, filter=inbox_filter),
+            app.client.query_all(app.config.projects_ds_id, filter=active_projects_filter),
+            app.client.query_all(app.config.tags_ds_id, filter=area_tags_filter),
+        )
+    except NotionAPIError as e:
+        return _handle_api_error(e)
+
+    # Build lookups so format_task can resolve names
+    project_lookup: dict[str, dict] = {}
+    for p in project_pages:
+        formatted = format_project(p)
+        project_lookup[formatted["id"]] = {
+            "name": formatted.get("name", ""),
+            "status": formatted.get("status"),
+        }
+    tag_lookup: dict[str, dict] = {}
+    for t in area_tag_pages:
+        formatted = format_tag(t)
+        tag_lookup[formatted["id"]] = {"name": formatted.get("name", "")}
+
+    def _fmt_bucket(pages: list[dict], cap: int) -> tuple[list[dict], bool]:
+        truncated = len(pages) > cap
+        sliced = pages[:cap]
+        return (
+            [
+                format_task(p, project_lookup=project_lookup, tag_lookup=tag_lookup)
+                for p in sliced
+            ],
+            truncated,
+        )
+
+    bucket_cap = _SNAPSHOT_BUCKET_CAP
+    completed_today, t_completed = _fmt_bucket(completed_pages, bucket_cap)
+    overdue_or_due_today, t_overdue = _fmt_bucket(overdue_pages, bucket_cap)
+    due_tomorrow, t_tomorrow = _fmt_bucket(tomorrow_pages, bucket_cap)
+    on_my_day, t_my_day = _fmt_bucket(my_day_pages, bucket_cap)
+    inbox, t_inbox = _fmt_bucket(inbox_pages, inbox_limit)
+
+    # Outstanding = dedup union of overdue_or_due_today ∪ on_my_day, preserving
+    # the overdue-bucket ordering first.
+    seen: set[str] = set()
+    outstanding: list[dict] = []
+    for task in overdue_or_due_today + on_my_day:
+        tid = task.get("id")
+        if not tid or tid in seen:
+            continue
+        seen.add(tid)
+        outstanding.append(task)
+
+    schema = app.tasks_schema
+    return {
+        "now": now_dt.isoformat(timespec="seconds"),
+        "timezone": app.config.timezone,
+        "buckets": {
+            "completed_today": completed_today,
+            "overdue_or_due_today": overdue_or_due_today,
+            "due_tomorrow": due_tomorrow,
+            "on_my_day": on_my_day,
+            "inbox": inbox,
+        },
+        "outstanding": outstanding,
+        "lookups": {
+            "projects": project_lookup,
+            "area_tags": tag_lookup,
+        },
+        "task_schema": {
+            "has_location_property": schema.has_location_property,
+            "location_property_name": schema.location_property_name,
+            "location_property_type": schema.location_property_type,
+            "location_options": list(schema.location_options),
+            "labels_options": list(schema.labels_options),
+        },
+        "truncated": {
+            "completed_today": t_completed,
+            "overdue_or_due_today": t_overdue,
+            "due_tomorrow": t_tomorrow,
+            "on_my_day": t_my_day,
+            "inbox": t_inbox,
+        },
+    }
+
+
+class BulkTaskUpdate(BaseModel):
+    """One row in a bulk_update_tasks call. Mirrors update_task parameters."""
+
+    task_id: str = Field(description="Task page ID, e.g. 'task_abc123'.")
+    name: str | None = Field(default=None, description="New task name.")
+    status: Literal["To Do", "Doing", "Done"] | None = Field(
+        default=None, description="New status."
+    )
+    due: str | None = Field(
+        default=None, description="New due date in YYYY-MM-DD format, e.g. '2026-05-09'."
+    )
+    priority: Literal["Low", "Medium", "High"] | None = Field(
+        default=None, description="New priority."
+    )
+    project_id: str | None = Field(default=None, description="New project page ID.")
+    labels: list[str] | None = Field(
+        default=None, description="New labels (replaces existing)."
+    )
+    my_day: bool | None = Field(default=None, description="Set My Day flag.")
+    parent_task_id: str | None = Field(
+        default=None, description="New parent task page ID."
+    )
+    tag_ids: list[str] | None = Field(
+        default=None, description="New Tag relation IDs (replaces existing)."
+    )
+    location: str | None = Field(
+        default=None,
+        description=(
+            "Sets the Tasks Location property. Auto-detects select / multi_select / status. "
+            "Ignored if Tasks has no Location property — see "
+            "daily_review_snapshot.task_schema.has_location_property."
+        ),
+    )
+
+
+@mcp.tool(
+    annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=True)
+)
+async def bulk_update_tasks(
+    updates: Annotated[
+        list[BulkTaskUpdate],
+        Field(description="List of per-task patches. Each follows the BulkTaskUpdate shape."),
+    ],
+    ctx: Context = None,
+) -> dict:
+    """Apply multiple task patches in a single call. Each update follows the same
+    shape as update_task plus tag_ids and location. Runs concurrently under the
+    Notion rate limiter; never raises on a single failure.
+
+    Use this at the END of a daily review or any workflow that updates more than
+    ~3 tasks at once. For a single task, use update_task instead.
+
+    Returns:
+      results — list of one entry per input update, in order:
+        {task_id, ok: true,  task: {formatted task dict}}     on success
+        {task_id, ok: false, error: 'human-readable reason'}  on failure
+      summary — {ok: N, failed: N, total: N}
+
+    Failures are per-row and self-describing — surface them to the user, retry the
+    failed rows, or skip them. The whole call never raises; ok=false rows are
+    surfaced through results, not through an exception.
+    """
+    app = _ctx(ctx)
+
+    if not updates:
+        return {
+            "results": [],
+            "summary": {"ok": 0, "failed": 0, "total": 0},
+        }
+
+    sem = asyncio.Semaphore(_BULK_UPDATE_CONCURRENCY)
+
+    async def _apply_one(idx: int, update: BulkTaskUpdate) -> dict:
+        async with sem:
+            props: dict = {}
+            warnings: list[str] = []
+
+            if update.name is not None:
+                props["Name"] = _prop_title(update.name)
+            if update.status is not None:
+                props["Status"] = _prop_status(update.status)
+            if update.due is not None:
+                props["Due"] = _prop_date(update.due)
+            if update.priority is not None:
+                props["Priority"] = _prop_status(update.priority)
+            if update.project_id is not None:
+                props["Project"] = _prop_relation([update.project_id])
+            if update.labels is not None:
+                props["Labels"] = _prop_multi_select(update.labels)
+            if update.my_day is not None:
+                props["My Day"] = _prop_checkbox(update.my_day)
+            if update.parent_task_id is not None:
+                props["Parent Task"] = _prop_relation([update.parent_task_id])
+            if update.tag_ids is not None:
+                props["Tag"] = _prop_relation(update.tag_ids)
+            if update.location is not None:
+                payload, warning = _build_location_payload(
+                    app.tasks_schema, update.location
+                )
+                if payload is not None and app.tasks_schema.location_property_name:
+                    props[app.tasks_schema.location_property_name] = payload
+                if warning:
+                    warnings.append(warning)
+
+            if not props:
+                return {
+                    "task_id": update.task_id,
+                    "ok": False,
+                    "error": (
+                        "No properties to update. Provide at least one field."
+                    ),
+                }
+
+            try:
+                page = await app.client.update_page(update.task_id, props)
+                row: dict = {
+                    "task_id": update.task_id,
+                    "ok": True,
+                    "task": format_task(page),
+                }
+                if warnings:
+                    row["_warnings"] = warnings
+                return row
+            except NotionAPIError as e:
+                err = _handle_api_error(e, "Use search_tasks to find valid task IDs.")
+                return {
+                    "task_id": update.task_id,
+                    "ok": False,
+                    "error": err.get("error", str(e)),
+                }
+
+    results = await asyncio.gather(
+        *(_apply_one(i, u) for i, u in enumerate(updates))
+    )
+    ok_count = sum(1 for r in results if r.get("ok"))
+    failed_count = len(results) - ok_count
+    return {
+        "results": results,
+        "summary": {"ok": ok_count, "failed": failed_count, "total": len(results)},
+    }
 
 
 # =========================================================================
