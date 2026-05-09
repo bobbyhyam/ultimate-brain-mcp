@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass, field
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 # ---------------------------------------------------------------------------
 # Status / type literals used across tools
@@ -49,6 +50,32 @@ def extract_select_options(schema: dict, prop_name: str) -> list[str]:
     options = prop.get("select", {}).get("options", [])
     return [opt["name"] for opt in options if isinstance(opt, dict) and "name" in opt]
 
+
+def extract_property_metadata(schema: dict, prop_name: str) -> dict:
+    """Return shape + options for *prop_name* on a Notion data source schema.
+
+    Used for live discovery of Tasks Location and Labels properties at server
+    startup. Handles select / multi_select / status uniformly — they all carry
+    options under their type-specific key.
+
+    Returns ``{"exists": False}`` if the property is absent. Otherwise:
+    ``{"exists": True, "name": <prop_name>, "type": <ptype>, "options": [<str>, ...]}``.
+    Options is empty for property types that don't carry a fixed option list.
+    """
+    prop = schema.get("properties", {}).get(prop_name)
+    if not isinstance(prop, dict):
+        return {"exists": False}
+    ptype = prop.get("type")
+    options: list[str] = []
+    if ptype in ("select", "multi_select", "status"):
+        raw_options = prop.get(ptype, {}).get("options", [])
+        options = [
+            opt["name"]
+            for opt in raw_options
+            if isinstance(opt, dict) and "name" in opt
+        ]
+    return {"exists": True, "name": prop_name, "type": ptype, "options": options}
+
 # ---------------------------------------------------------------------------
 # Secondary database registry — maps friendly name → env var
 # ---------------------------------------------------------------------------
@@ -83,6 +110,10 @@ class UBConfig:
     tags_ds_id: str
     goals_ds_id: str
 
+    # IANA timezone name used to resolve "today" / "tomorrow" / "now" inside
+    # workflow tools like daily_review_snapshot. Validated at load time.
+    timezone: str = "UTC"
+
     # Secondary data source IDs (optional) — name → ds_id
     secondary_ds: dict[str, str] = field(default_factory=dict)
 
@@ -112,6 +143,21 @@ class UBConfig:
         if missing:
             raise ValueError(f"Missing required environment variables: {', '.join(missing)}")
 
+        # Workspace timezone — UB_TIMEZONE wins, then TZ, then UTC.
+        # Validated against the system tz database; typos fail fast at startup.
+        tz_name = (
+            os.environ.get("UB_TIMEZONE")
+            or os.environ.get("TZ")
+            or "UTC"
+        )
+        try:
+            ZoneInfo(tz_name)
+        except (ZoneInfoNotFoundError, ValueError) as e:
+            raise ValueError(
+                f"Invalid timezone {tz_name!r}: {e}. "
+                f"Set UB_TIMEZONE to an IANA name like 'Europe/London' or 'America/New_York'."
+            ) from e
+
         # Discover configured secondary databases
         secondary: dict[str, str] = {}
         for name, env_var in SECONDARY_DB_ENV_MAP.items():
@@ -126,5 +172,6 @@ class UBConfig:
             notes_ds_id=notes,
             tags_ds_id=tags,
             goals_ds_id=goals,
+            timezone=tz_name,
             secondary_ds=secondary,
         )

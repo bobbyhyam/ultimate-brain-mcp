@@ -132,8 +132,20 @@ def _prop(page: dict, name: str) -> dict:
 # ---------------------------------------------------------------------------
 
 
-def format_task(page: dict) -> dict:
-    """Format a Task page into an agent-friendly dict."""
+def format_task(
+    page: dict,
+    *,
+    project_lookup: dict[str, dict] | None = None,
+    tag_lookup: dict[str, dict] | None = None,
+) -> dict:
+    """Format a Task page into an agent-friendly dict.
+
+    When *project_lookup* (``{id → {name, ...}}``) is supplied, the result
+    additionally carries ``project_name`` resolved from the lookup. When
+    *tag_lookup* is supplied, ``area_tag_names`` is populated for any Tag
+    relations whose IDs appear in the lookup. Existing callers that pass
+    nothing keep the legacy shape — IDs only, no resolved names.
+    """
     props = page.get("properties", {})
     result: dict = {
         "id": _page_id(page),
@@ -148,9 +160,29 @@ def format_task(page: dict) -> dict:
     project_ids = _relation(props.get("Project", {}))
     if project_ids:
         result["project_ids"] = project_ids
+        if project_lookup:
+            names = [
+                project_lookup[pid].get("name", "")
+                for pid in project_ids
+                if pid in project_lookup and project_lookup[pid].get("name")
+            ]
+            if names:
+                result["project_name"] = ", ".join(names)
     parent_ids = _relation(props.get("Parent Task", {}))
     if parent_ids:
         result["parent_task_ids"] = parent_ids
+    # Tag relation (Area / Resource / Entity tags from the Tags database)
+    tag_ids = _relation(props.get("Tag", props.get("Tags", {})))
+    if tag_ids:
+        result["tag_ids"] = tag_ids
+        if tag_lookup:
+            names = [
+                tag_lookup[tid].get("name", "")
+                for tid in tag_ids
+                if tid in tag_lookup and tag_lookup[tid].get("name")
+            ]
+            if names:
+                result["area_tag_names"] = names
     labels = _multi_select(props.get("Labels", {}))
     if labels:
         result["labels"] = labels
