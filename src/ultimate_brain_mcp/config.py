@@ -13,8 +13,41 @@ TASK_STATUSES = ["To Do", "Doing", "Done"]
 PROJECT_STATUSES = ["Not Started", "Doing", "Ongoing", "Done"]
 GOAL_STATUSES = ["Active", "Achieved", "Dropped"]
 TAG_TYPES = ["Area", "Resource", "Entity"]
-NOTE_TYPES = ["Note", "Meeting Notes", "Brainstorm", "Journal"]
+
+# Notes Type select. Ultimate Brain v3.0 ships 13 options. Used as a fallback
+# when live discovery from the Notion data source schema fails at server
+# startup; the live list is preferred and lives on AppContext.note_types.
+NOTE_TYPES = [
+    "Journal", "Meeting", "Web Clip", "Lecture", "Reference",
+    "Book", "Idea", "Plan", "Recipe", "Voice Note",
+    "Daily", "Note", "Brainstorm",
+]
+
+# Property name on the Notes data source that holds the Type select.
+# Single source of truth — used by lifespan discovery and by formatters.
+NOTES_TYPE_PROP = "Type"
+
 TASK_PRIORITIES = ["Low", "Medium", "High"]
+
+
+# ---------------------------------------------------------------------------
+# Schema introspection helpers
+# ---------------------------------------------------------------------------
+
+
+def extract_select_options(schema: dict, prop_name: str) -> list[str]:
+    """Pull select option names for *prop_name* out of a Notion data source schema.
+
+    Returns an empty list if the property is missing or isn't a select — the
+    caller is expected to treat empty as a discovery failure.
+    """
+    prop = schema.get("properties", {}).get(prop_name)
+    if not isinstance(prop, dict):
+        return []
+    if prop.get("type") != "select":
+        return []
+    options = prop.get("select", {}).get("options", [])
+    return [opt["name"] for opt in options if isinstance(opt, dict) and "name" in opt]
 
 # ---------------------------------------------------------------------------
 # Secondary database registry — maps friendly name → env var

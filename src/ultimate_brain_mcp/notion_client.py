@@ -533,3 +533,12 @@ class NotionClient:
         """GET /v1/databases/{database_id}"""
         resp = await self._request("GET", f"/databases/{database_id}")
         return resp.json()
+
+    async def get_data_source(self, ds_id: str) -> dict:
+        """GET /v1/data_sources/{ds_id} — returns schema with `properties` map.
+
+        Used at server startup to discover live select options (e.g. Notes
+        Type) instead of relying on hardcoded enums.
+        """
+        resp = await self._request("GET", f"/data_sources/{ds_id}")
+        return resp.json()
