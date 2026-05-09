@@ -1,4 +1,4 @@
-name: Publish to PyPI
+name: Publish release
 on:
   push:
     tags: ["v*"]
@@ -14,3 +14,27 @@ jobs:
       - uses: astral-sh/setup-uv@v4
       - run: uv build
       - run: uv publish
+
+  release-skill:
+    # Build the .claude/skills/ub directory into a single ultimate-brain-mcp.skill
+    # archive (zip, root-level SKILL.md + references/) and attach it to the
+    # GitHub release so users can grab one file and upload it to claude.ai.
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build skill archive
+        run: |
+          # Stage the skill contents under a working dir so the archive
+          # has SKILL.md + references/ at its root (no parent folder).
+          mkdir -p _skill_pkg
+          cp -R .claude/skills/ub/. _skill_pkg/
+          ( cd _skill_pkg && zip -r ../ultimate-brain-mcp.skill . )
+          unzip -l ultimate-brain-mcp.skill
+      - name: Attach to GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ultimate-brain-mcp.skill
+          fail_on_unmatched_files: true
