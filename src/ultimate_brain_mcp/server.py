@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import asyncio
+import sys
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
 from typing import Annotated, Literal
 
@@ -16,11 +17,13 @@ from pydantic import Field
 from .config import (
     GOAL_STATUSES,
     NOTE_TYPES,
+    NOTES_TYPE_PROP,
     PROJECT_STATUSES,
     TAG_TYPES,
     TASK_PRIORITIES,
     TASK_STATUSES,
     UBConfig,
+    extract_select_options,
 )
 from .formatters import (
     blocks_to_text,
@@ -48,16 +51,58 @@ _DELETE_CONCURRENCY = 5
 class AppContext:
     client: NotionClient
     config: UBConfig
+    # Live Notes Type select options. Set once at lifespan startup before
+    # yield, read-only thereafter — no locking required.
+    note_types: list[str] = field(default_factory=list)
+    # "discovered" if populated from the live Notion schema, "fallback" if
+    # discovery failed and we fell back to config.NOTE_TYPES.
+    note_types_source: Literal["discovered", "fallback"] = "fallback"
 
 
 @asynccontextmanager
 async def app_lifespan(server: FastMCP) -> AsyncIterator[AppContext]:
     config = UBConfig.from_env()
     client = NotionClient(config.notion_secret)
+    note_types, note_types_source = await _discover_note_types(client, config)
     try:
-        yield AppContext(client=client, config=config)
+        yield AppContext(
+            client=client,
+            config=config,
+            note_types=note_types,
+            note_types_source=note_types_source,
+        )
     finally:
         await client.close()
+
+
+async def _discover_note_types(
+    client: NotionClient, config: UBConfig
+) -> tuple[list[str], Literal["discovered", "fallback"]]:
+    """Fetch live Type select options from the Notes data source.
+
+    Falls back to config.NOTE_TYPES on any failure — including an empty
+    discovered list, which would otherwise silently break every note tool
+    call for the session (see ISC-35).
+    """
+    try:
+        schema = await client.get_data_source(config.notes_ds_id)
+    except Exception as e:  # noqa: BLE001 — discovery is best-effort
+        print(
+            f"[ultimate-brain-mcp] Notes Type discovery failed ({e!r}); "
+            f"falling back to static NOTE_TYPES.",
+            file=sys.stderr,
+        )
+        return list(NOTE_TYPES), "fallback"
+
+    options = extract_select_options(schema, NOTES_TYPE_PROP)
+    if not options:
+        print(
+            f"[ultimate-brain-mcp] Notes data source has no '{NOTES_TYPE_PROP}' "
+            f"select options; falling back to static NOTE_TYPES.",
+            file=sys.stderr,
+        )
+        return list(NOTE_TYPES), "fallback"
+    return options, "discovered"
 
 
 mcp = FastMCP(
@@ -87,6 +132,23 @@ def _today() -> str:
 
 def _error(msg: str) -> dict:
     return {"error": msg}
+
+
+def _validate_note_type(app: AppContext, note_type: str | None) -> dict | None:
+    """Reject `note_type` not in the live discovered options.
+
+    Validation is a case-sensitive exact match — `"meeting"` does not match
+    `"Meeting"`. The error message lists the live valid set so an AI client
+    can self-correct on the next call.
+    """
+    if note_type is None:
+        return None
+    if note_type in app.note_types:
+        return None
+    return _error(
+        f"Invalid note_type {note_type!r}. Valid options "
+        f"(source: {app.note_types_source}): {app.note_types}"
+    )
 
 
 def _handle_api_error(e: NotionAPIError, hint: str = "") -> dict:
@@ -768,6 +830,8 @@ async def search_notes(
     """Search notes by title text, type, project, tag, favorite status, or date.
     For note content/body, use get_note_content with the note ID."""
     app = _ctx(ctx)
+    if (err := _validate_note_type(app, note_type)) is not None:
+        return err
     filters: list[dict] = []
 
     if note_type:
@@ -841,6 +905,8 @@ async def create_note(
 ) -> dict:
     """Create a new note. Use search_projects for project IDs, search_tags for tag IDs."""
     app = _ctx(ctx)
+    if (err := _validate_note_type(app, note_type)) is not None:
+        return err
     props: dict = {
         "Name": _prop_title(name),
         "Note Date": _prop_date(_today()),
@@ -881,6 +947,8 @@ async def update_note(
 ) -> dict:
     """Update note properties. Only provided fields are changed."""
     app = _ctx(ctx)
+    if (err := _validate_note_type(app, note_type)) is not None:
+        return err
     props: dict = {}
     if name is not None:
         props["Name"] = _prop_title(name)
