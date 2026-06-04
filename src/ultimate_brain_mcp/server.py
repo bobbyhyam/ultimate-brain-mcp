@@ -453,7 +453,8 @@ async def search_tasks(
         pages = await app.client.query_all(
             app.config.tasks_ds_id, filter=query_filter, sorts=sorts
         )
-        return [format_task(p) for p in pages[:limit]]
+        loc_name = app.tasks_schema.location_property_name
+        return [format_task(p, location_property_name=loc_name) for p in pages[:limit]]
     except NotionAPIError as e:
         return _handle_api_error(e)
 
@@ -475,7 +476,8 @@ async def get_my_day(
     }
     try:
         pages = await app.client.query_all(app.config.tasks_ds_id, filter=query_filter)
-        tasks = [format_task(p) for p in pages]
+        loc_name = app.tasks_schema.location_property_name
+        tasks = [format_task(p, location_property_name=loc_name) for p in pages]
         priority_order = {"High": 0, "Medium": 1, "Low": 2, None: 3}
         tasks.sort(key=lambda t: priority_order.get(t.get("priority"), 3))
         return tasks
@@ -501,7 +503,8 @@ async def get_inbox_tasks(
     }
     try:
         pages = await app.client.query_all(app.config.tasks_ds_id, filter=query_filter)
-        return [format_task(p) for p in pages]
+        loc_name = app.tasks_schema.location_property_name
+        return [format_task(p, location_property_name=loc_name) for p in pages]
     except NotionAPIError as e:
         return _handle_api_error(e)
 
@@ -601,7 +604,9 @@ async def create_task(
 
     try:
         page = await app.client.create_page(app.config.tasks_ds_id, props, children=children)
-        result = format_task(page)
+        result = format_task(
+            page, location_property_name=app.tasks_schema.location_property_name
+        )
         if location_warning:
             result["_warning"] = location_warning
         return result
@@ -630,6 +635,10 @@ async def update_task(
     project_id: Annotated[str | None, Field(description="New project page ID.")] = None,
     labels: Annotated[list[str] | None, Field(description="New labels (replaces existing).")] = None,
     my_day: Annotated[bool | None, Field(description="Set My Day flag.")] = None,
+    parent_task_id: Annotated[
+        str | None,
+        Field(description="New parent task page ID (for sub-tasks)."),
+    ] = None,
     tag_ids: Annotated[
         list[str] | None,
         Field(description=(
@@ -671,6 +680,8 @@ async def update_task(
         props["Labels"] = _prop_multi_select(labels)
     if my_day is not None:
         props["My Day"] = _prop_checkbox(my_day)
+    if parent_task_id is not None:
+        props["Parent Task"] = _prop_relation([parent_task_id])
     if tag_ids is not None:
         props["Tag"] = _prop_relation(tag_ids)
     if location is not None:
@@ -685,7 +696,9 @@ async def update_task(
 
     try:
         page = await app.client.update_page(task_id, props)
-        result = format_task(page)
+        result = format_task(
+            page, location_property_name=app.tasks_schema.location_property_name
+        )
         if location_warning:
             result["_warning"] = location_warning
         return result
@@ -704,9 +717,10 @@ async def complete_task(
     Handles recurring tasks: resets status to To Do and advances due date by the recurrence interval.
     Use search_tasks to find task IDs."""
     app = _ctx(ctx)
+    loc_name = app.tasks_schema.location_property_name
     try:
         page = await app.client.get_page(task_id)
-        task = format_task(page)
+        task = format_task(page, location_property_name=loc_name)
 
         # Check for recurrence
         recurrence = task.get("recurrence", "")
@@ -719,7 +733,7 @@ async def complete_task(
                 props["Due"] = _prop_date(new_due)
             props["My Day"] = _prop_checkbox(False)
             page = await app.client.update_page(task_id, props)
-            result = format_task(page)
+            result = format_task(page, location_property_name=loc_name)
             result["_note"] = f"Recurring task reset. Next due: {new_due or 'unchanged'}"
             return result
         else:
@@ -730,7 +744,7 @@ async def complete_task(
                 "My Day": _prop_checkbox(False),
             }
             page = await app.client.update_page(task_id, props)
-            return format_task(page)
+            return format_task(page, location_property_name=loc_name)
     except NotionAPIError as e:
         return _handle_api_error(e, "Use search_tasks to find valid task IDs.")
 
@@ -890,7 +904,8 @@ async def get_project_detail(
         )
 
         project = format_project(project_page)
-        tasks = [format_task(t) for t in task_pages]
+        loc_name = app.tasks_schema.location_property_name
+        tasks = [format_task(t, location_property_name=loc_name) for t in task_pages]
         notes = [format_note(n) for n in note_pages[:10]]
 
         # Task breakdown by status
@@ -1539,7 +1554,8 @@ async def daily_summary(
             my_day_fut, overdue_fut, inbox_fut, projects_fut, goals_fut
         )
 
-        my_day_tasks = [format_task(p) for p in my_day]
+        loc_name = app.tasks_schema.location_property_name
+        my_day_tasks = [format_task(p, location_property_name=loc_name) for p in my_day]
         priority_order = {"High": 0, "Medium": 1, "Low": 2, None: 3}
         my_day_tasks.sort(key=lambda t: priority_order.get(t.get("priority"), 3))
 
@@ -1551,7 +1567,7 @@ async def daily_summary(
             },
             "overdue": {
                 "count": len(overdue),
-                "tasks": [format_task(p) for p in overdue],
+                "tasks": [format_task(p, location_property_name=loc_name) for p in overdue],
             },
             "inbox_count": len(inbox),
             "active_projects_count": len(projects),
@@ -1748,12 +1764,19 @@ async def daily_review_snapshot(
         formatted = format_tag(t)
         tag_lookup[formatted["id"]] = {"name": formatted.get("name", "")}
 
+    loc_name = app.tasks_schema.location_property_name
+
     def _fmt_bucket(pages: list[dict], cap: int) -> tuple[list[dict], bool]:
         truncated = len(pages) > cap
         sliced = pages[:cap]
         return (
             [
-                format_task(p, project_lookup=project_lookup, tag_lookup=tag_lookup)
+                format_task(
+                    p,
+                    project_lookup=project_lookup,
+                    tag_lookup=tag_lookup,
+                    location_property_name=loc_name,
+                )
                 for p in sliced
             ],
             truncated,
@@ -1928,7 +1951,10 @@ async def bulk_update_tasks(
                 row: dict = {
                     "task_id": update.task_id,
                     "ok": True,
-                    "task": format_task(page),
+                    "task": format_task(
+                        page,
+                        location_property_name=app.tasks_schema.location_property_name,
+                    ),
                 }
                 if warnings:
                     row["_warnings"] = warnings

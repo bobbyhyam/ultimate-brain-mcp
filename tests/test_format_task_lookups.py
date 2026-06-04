@@ -107,3 +107,73 @@ def test_format_task_no_relations_no_resolved_fields_even_with_lookups():
     assert "project_name" not in task
     assert "tag_ids" not in task
     assert "area_tag_names" not in task
+
+
+def _with_location(page: dict, prop_name: str, prop: dict) -> dict:
+    """Attach a Location-style property to a task page under *prop_name*."""
+    page["properties"][prop_name] = prop
+    return page
+
+
+def test_format_task_location_select():
+    """A select-typed Location property is surfaced as a string."""
+    page = _with_location(
+        _task_page(), "Location", {"type": "select", "select": {"name": "Home"}}
+    )
+
+    task = format_task(page, location_property_name="Location")
+
+    assert task["location"] == "Home"
+
+
+def test_format_task_location_status():
+    """A status-typed Location property is surfaced as a string."""
+    page = _with_location(
+        _task_page(), "Location", {"type": "status", "status": {"name": "Office"}}
+    )
+
+    task = format_task(page, location_property_name="Location")
+
+    assert task["location"] == "Office"
+
+
+def test_format_task_location_multi_select():
+    """A multi_select-typed Location property is surfaced as a list."""
+    page = _with_location(
+        _task_page(),
+        "Where",
+        {"type": "multi_select", "multi_select": [{"name": "Home"}, {"name": "Errands"}]},
+    )
+
+    task = format_task(page, location_property_name="Where")
+
+    assert task["location"] == ["Home", "Errands"]
+
+
+def test_format_task_location_omitted_without_name():
+    """Without location_property_name, location is never added (legacy shape)."""
+    page = _with_location(
+        _task_page(), "Location", {"type": "select", "select": {"name": "Home"}}
+    )
+
+    task = format_task(page)
+
+    assert "location" not in task
+
+
+def test_format_task_location_absent_when_property_missing():
+    """A name that isn't present on the page simply yields no location field."""
+    task = format_task(_task_page(), location_property_name="Location")
+
+    assert "location" not in task
+
+
+def test_format_task_location_absent_when_empty():
+    """An empty Location value yields no location field."""
+    page = _with_location(
+        _task_page(), "Location", {"type": "select", "select": None}
+    )
+
+    task = format_task(page, location_property_name="Location")
+
+    assert "location" not in task

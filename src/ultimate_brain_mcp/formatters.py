@@ -137,6 +137,7 @@ def format_task(
     *,
     project_lookup: dict[str, dict] | None = None,
     tag_lookup: dict[str, dict] | None = None,
+    location_property_name: str | None = None,
 ) -> dict:
     """Format a Task page into an agent-friendly dict.
 
@@ -145,6 +146,12 @@ def format_task(
     *tag_lookup* is supplied, ``area_tag_names`` is populated for any Tag
     relations whose IDs appear in the lookup. Existing callers that pass
     nothing keep the legacy shape — IDs only, no resolved names.
+
+    When *location_property_name* is supplied (the dynamically-discovered Tasks
+    Location property name), the result carries ``location``. The shape mirrors
+    how it is stored: a string for ``select`` / ``status`` properties, a list
+    for ``multi_select``. Absent when no name is passed, the property is missing
+    from the page, or its value is empty.
     """
     props = page.get("properties", {})
     result: dict = {
@@ -186,6 +193,22 @@ def format_task(
     labels = _multi_select(props.get("Labels", {}))
     if labels:
         result["labels"] = labels
+    # Location — dynamic property name discovered at boot. Dispatch on the
+    # property's embedded `type` so we don't need the TasksSchema here.
+    if location_property_name:
+        loc_prop = props.get(location_property_name)
+        if loc_prop:
+            ptype = loc_prop.get("type")
+            if ptype == "select":
+                val = _select(loc_prop)
+            elif ptype == "status":
+                val = _status(loc_prop)
+            elif ptype == "multi_select":
+                val = _multi_select(loc_prop)  # list
+            else:
+                val = None
+            if val:
+                result["location"] = val
     # Recurrence (Recur Unit select + Recur Interval number)
     recur_unit = _select(props.get("Recur Unit", {}))
     recur_interval = _number(props.get("Recur Interval", {}))
