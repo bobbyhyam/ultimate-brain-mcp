@@ -65,6 +65,34 @@ Tests require a live Notion workspace with valid credentials in `.env`. Tests sk
 - `test_content.py` — Live API integration tests for page body content (create with content, set/append/clear content, get_page_content).
 - `conftest.py` — Seed fixtures create items prefixed with `[TEST]` and archive them on teardown.
 
+### End-to-end testing via Claude Code + local dev server
+
+For exercising tools as a real MCP client (not just pytest), register this working tree as a local dev server and drive it from a headless Claude Code session in a detached tmux window:
+
+```bash
+# Register the working-tree build (project scope → .mcp.json, which is gitignored).
+# `uv run --env-file` loads .env at launch — the server itself does not read .env
+# (only the test suite does), so the --env-file flag is required.
+claude mcp add ultimate-brain-dev --scope project -- \
+  uv run --env-file "$PWD/.env" --directory "$PWD" ultimate-brain-mcp
+
+# Run a test prompt headless in a detached tmux session, scoped to only the dev
+# tools (no permission bypass). Redirect to a file and append a completion marker.
+tmux new-session -d -s ub-test -c "$PWD"
+tmux send-keys -t ub-test 'claude -p "$(cat /tmp/ub_test_prompt.txt)" \
+  --allowedTools "mcp__ultimate-brain-dev__search_tasks mcp__ultimate-brain-dev__update_task ..." \
+  > /tmp/ub_test_out.txt 2>&1; echo "===EXIT=$?===" >> /tmp/ub_test_out.txt' Enter
+
+# Watch for completion, then read the transcript:
+until grep -q '===EXIT=' /tmp/ub_test_out.txt; do sleep 2; done
+```
+
+Notes:
+- Prefer `--allowedTools` over `--dangerously-skip-permissions` — whitelist the specific `mcp__ultimate-brain-dev__*` tools the test needs. The classifier blocks skip-permissions for spawned agents.
+- Tools surface as `mcp__ultimate-brain-dev__<tool>` in the spawned session.
+- Have the test prompt create only `[TEST]`-prefixed items and clean up afterward. Note `archive_item` requires the Tasks DB to have an `Archived` property; where it's absent, verify/clean up via the Notion API directly (a trashed page has `in_trash: true` and is excluded from `search_*` results but still resolves via `get_page`).
+- Tear down with `tmux kill-session -t ub-test` and `claude mcp remove ultimate-brain-dev -s project`.
+
 ## Adding New Tools
 
 1. Add tool function in `server.py` with `@mcp.tool()` and `ToolAnnotations`
