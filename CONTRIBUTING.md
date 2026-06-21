@@ -49,6 +49,31 @@ uv run mypy src/             # type check
 `ruff check` and `ruff format` are configured in `pyproject.toml`; please run
 both before opening a PR.
 
+## pre-commit
+
+A [pre-commit](https://pre-commit.com/) config (`.pre-commit-config.yaml`)
+mirrors the CI lint/format checks so you catch issues before pushing. Install
+the git hook once:
+
+```bash
+uv run --with pre-commit pre-commit install
+```
+
+It then runs ruff (lint + format) and basic file-hygiene checks on every commit.
+To run it across the whole tree manually:
+
+```bash
+uv run --with pre-commit pre-commit run --all-files
+```
+
+mypy is **not** a pre-commit hook (it is slow/noisy under pre-commit's isolated
+envs); it runs in CI and you can run it locally with `uv run mypy src/`.
+
+## Changelog
+
+Add a bullet under the `## [Unreleased]` section of
+[`CHANGELOG.md`](CHANGELOG.md) describing any user-facing change in your PR.
+
 ## Pull request expectations
 
 - CI must be green. The `CI` workflow runs `ruff check`, `ruff format --check`,

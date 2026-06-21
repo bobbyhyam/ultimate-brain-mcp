@@ -1,0 +1,29 @@
+# Pre-commit hooks that mirror CI (.github/workflows/ci.yml) so contributors
+# catch lint/format/whitespace issues before pushing.
+#
+# Install once:  uv run --with pre-commit pre-commit install
+# Run manually:  uv run --with pre-commit pre-commit run --all-files
+#
+# NOTE: mypy is intentionally NOT a pre-commit hook. mypy in pre-commit either
+# uses an isolated env (which can't see the project's deps and produces false
+# positives) or a `local` hook shelling into `uv run mypy`, which is slow on
+# every commit. Type checking runs in CI across 3.11/3.12/3.13 instead; run it
+# locally with `uv run mypy src/`.
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    # Pinned to match ruff>=0.15 in pyproject.toml's dev deps.
+    rev: v0.15.18
+    hooks:
+      - id: ruff-check
+        args: [--fix]
+      - id: ruff-format
+
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+      - id: check-toml
+      - id: check-merge-conflict
+      - id: check-added-large-files
