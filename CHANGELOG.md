@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- `scripts/release.sh` now uses a PR-based flow: it rolls the CHANGELOG and
+  updates `uv.lock` alongside the version bump, opens an auto-merge PR so the
+  release commit passes CI before landing, then tags to trigger publishing.
+
 ## [0.5.3] - 2026-06-21
 
 ### Added
