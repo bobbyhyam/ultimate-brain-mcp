@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.2] - 2026-06-21
+
 ### Added
 
 - Contributor-readiness tooling: `.pre-commit-config.yaml` (ruff lint + format
@@ -42,6 +44,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `daily_review_snapshot` and `bulk_update_tasks` workflow consolidator tools.
 
-[Unreleased]: https://github.com/bobbyhyam/ultimate-brain-mcp/compare/v0.5.1...HEAD
+[Unreleased]: https://github.com/bobbyhyam/ultimate-brain-mcp/compare/v0.5.2...HEAD
+[0.5.2]: https://github.com/bobbyhyam/ultimate-brain-mcp/compare/v0.5.1...v0.5.2
 [0.5.1]: https://github.com/bobbyhyam/ultimate-brain-mcp/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/bobbyhyam/ultimate-brain-mcp/releases/tag/v0.5.0
