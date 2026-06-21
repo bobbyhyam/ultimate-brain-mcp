@@ -127,6 +127,33 @@ def _prop(page: dict, name: str) -> dict:
     return page.get("properties", {}).get(name, {})
 
 
+def _truncated_relations(page: dict) -> list[str]:
+    """Names of relation properties whose inline value is truncated.
+
+    Notion returns at most 25 related-page IDs inline and sets ``has_more`` when
+    there are more; the full list requires the paginated page-property endpoint,
+    which this server does not yet fetch. Surfacing the names lets callers see
+    the truncation rather than silently receiving a partial list.
+    """
+    return [
+        name
+        for name, prop in page.get("properties", {}).items()
+        if isinstance(prop, dict)
+        and prop.get("type") == "relation"
+        and prop.get("has_more")
+    ]
+
+
+def _annotate_truncation(result: dict, page: dict) -> dict:
+    """Attach a ``_truncated_relations`` warning field when any relation on the
+    page is capped at Notion's 25-item inline limit. Returns *result* for use
+    directly in ``return`` statements."""
+    truncated = _truncated_relations(page)
+    if truncated:
+        result["_truncated_relations"] = truncated
+    return result
+
+
 # ---------------------------------------------------------------------------
 # Per-database formatters
 # ---------------------------------------------------------------------------
@@ -219,7 +246,7 @@ def format_task(
     done_date = _date_start(props.get("Completed", {}))
     if done_date:
         result["completion_date"] = done_date
-    return result
+    return _annotate_truncation(result, page)
 
 
 def format_project(page: dict) -> dict:
@@ -246,7 +273,7 @@ def format_project(page: dict) -> dict:
     archived = _checkbox(props.get("Archived", {}))
     if archived:
         result["archived"] = True
-    return result
+    return _annotate_truncation(result, page)
 
 
 def format_note(page: dict) -> dict:
@@ -273,7 +300,7 @@ def format_note(page: dict) -> dict:
     url = _url(props.get("URL", {}))
     if url:
         result["source_url"] = url
-    return result
+    return _annotate_truncation(result, page)
 
 
 def format_tag(page: dict) -> dict:
@@ -291,7 +318,7 @@ def format_tag(page: dict) -> dict:
     fav = _checkbox(props.get("Favorite", {}))
     if fav:
         result["favorite"] = True
-    return result
+    return _annotate_truncation(result, page)
 
 
 def format_goal(page: dict) -> dict:
@@ -315,7 +342,7 @@ def format_goal(page: dict) -> dict:
     achieved = _date_start(props.get("Achieved", {}))
     if achieved:
         result["achieved_date"] = achieved
-    return result
+    return _annotate_truncation(result, page)
 
 
 # ---------------------------------------------------------------------------
@@ -355,7 +382,7 @@ def format_generic_page(page: dict) -> dict:
             # Skip empty/None values to keep response clean
             if value is not None and value != "" and value != [] and value != {}:
                 result[prop_name] = value
-    return result
+    return _annotate_truncation(result, page)
 
 
 # ---------------------------------------------------------------------------

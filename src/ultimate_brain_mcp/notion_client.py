@@ -25,6 +25,10 @@ import httpx
 
 NOTION_BASE = "https://api.notion.com/v1"
 NOTION_VERSION = "2025-09-03"
+# The page-markdown endpoints (GET/PATCH /pages/{id}/markdown) require a newer
+# API version than the rest of the surface. We pin it per-call rather than
+# globally so all other endpoints stay on the stable 2025-09-03 contract.
+MARKDOWN_NOTION_VERSION = "2026-03-11"
 
 # Notion-documented limits (https://developers.notion.com/reference/request-limits)
 MAX_CHILDREN_PER_ARRAY = 100
@@ -181,8 +185,21 @@ class NotionClient:
     # ------------------------------------------------------------------
 
     async def _request(
-        self, method: str, url: str, **kwargs: object
+        self,
+        method: str,
+        url: str,
+        *,
+        notion_version: str | None = None,
+        **kwargs: object,
     ) -> httpx.Response:
+        # Per-call API version override. The client default (2025-09-03) is set
+        # on the AsyncClient; passing notion_version layers an endpoint-specific
+        # version (e.g. the page-markdown endpoints' 2026-03-11) onto this call
+        # only, mirroring the official server's per-operation version pinning.
+        if notion_version is not None:
+            headers = dict(kwargs.pop("headers", {}) or {})
+            headers["Notion-Version"] = notion_version
+            kwargs["headers"] = headers
         backoff = 1.0
         last_error: NotionAPIError | None = None
         for attempt in range(MAX_RETRIES + 1):
@@ -350,6 +367,76 @@ class NotionClient:
         """PATCH /v1/pages/{page_id}"""
         resp = await self._request(
             "PATCH", f"/pages/{page_id}", json={"properties": properties}
+        )
+        return resp.json()
+
+    # ------------------------------------------------------------------
+    # Page content as Markdown (server-side conversion, 2026-03-11+)
+    # ------------------------------------------------------------------
+
+    async def get_page_markdown(self, page_id: str) -> dict:
+        """GET /v1/pages/{page_id}/markdown — page body as enhanced Markdown.
+
+        Returns the raw response dict: ``markdown`` (str), ``truncated`` (bool),
+        and ``unknown_block_ids`` (list) for blocks that could not be rendered.
+        Notion handles all block types server-side, including tables, toggles,
+        and callouts that our text converters do not cover.
+        """
+        resp = await self._request(
+            "GET",
+            f"/pages/{page_id}/markdown",
+            notion_version=MARKDOWN_NOTION_VERSION,
+        )
+        return resp.json()
+
+    async def replace_page_markdown(
+        self, page_id: str, markdown: str, *, allow_deleting_content: bool = False
+    ) -> dict:
+        """PATCH /v1/pages/{page_id}/markdown — overwrite the whole page body.
+
+        Notion performs block splitting/nesting server-side, so this replaces
+        the chunked append machinery for full-body writes.
+        """
+        body = {
+            "type": "replace_content",
+            "replace_content": {
+                "new_str": markdown,
+                "allow_deleting_content": allow_deleting_content,
+            },
+        }
+        resp = await self._request(
+            "PATCH",
+            f"/pages/{page_id}/markdown",
+            json=body,
+            notion_version=MARKDOWN_NOTION_VERSION,
+        )
+        return resp.json()
+
+    async def update_page_markdown(
+        self,
+        page_id: str,
+        content_updates: list[dict],
+        *,
+        allow_deleting_content: bool = False,
+    ) -> dict:
+        """PATCH /v1/pages/{page_id}/markdown — targeted find-and-replace edits.
+
+        ``content_updates`` is a list (max 100) of
+        ``{"old_str", "new_str", "replace_all_matches"?}`` dicts applied in
+        order. Far cheaper than read-whole-page-then-rewrite for small edits.
+        """
+        body = {
+            "type": "update_content",
+            "update_content": {
+                "content_updates": content_updates,
+                "allow_deleting_content": allow_deleting_content,
+            },
+        }
+        resp = await self._request(
+            "PATCH",
+            f"/pages/{page_id}/markdown",
+            json=body,
+            notion_version=MARKDOWN_NOTION_VERSION,
         )
         return resp.json()
 
