@@ -99,3 +99,41 @@ async def test_format_generic_page(notion_client: NotionClient, ub_config: UBCon
     assert "url" in generic
     # Should have extracted at least some properties
     assert len(generic) > 2
+
+
+# ---------------------------------------------------------------------------
+# Relation truncation warning (no credentials — pure formatter logic)
+# ---------------------------------------------------------------------------
+
+
+def _page_with_relation(prop_name, *, has_more):
+    return {
+        "id": "p1",
+        "url": "http://example/p1",
+        "properties": {
+            "Name": {"type": "title", "title": [{"plain_text": "X"}]},
+            prop_name: {
+                "type": "relation",
+                "relation": [{"id": f"r{i}"} for i in range(25)],
+                "has_more": has_more,
+            },
+        },
+    }
+
+
+def test_truncated_relation_surfaces_warning():
+    page = _page_with_relation("Goals", has_more=True)
+    result = format_project(page)
+    assert result.get("_truncated_relations") == ["Goals"]
+
+
+def test_untruncated_relation_no_warning():
+    page = _page_with_relation("Goals", has_more=False)
+    result = format_project(page)
+    assert "_truncated_relations" not in result
+
+
+def test_generic_page_truncation_warning():
+    page = _page_with_relation("Linked", has_more=True)
+    result = format_generic_page(page)
+    assert result.get("_truncated_relations") == ["Linked"]

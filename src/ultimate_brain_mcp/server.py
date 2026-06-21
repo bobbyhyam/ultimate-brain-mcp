@@ -89,14 +89,41 @@ class AppContext:
     # means discovery failed and the location parameter on tools will no-op
     # with a `_warning` field in results.
     tasks_schema: TasksSchema = field(default_factory=TasksSchema)
+    # Whether the page-markdown endpoints (API 2026-03-11) are available.
+    # None = unknown (not probed yet); set True on first success, False on first
+    # version-unavailable error. Once True, markdown errors are surfaced rather
+    # than silently degraded to the block path (a 400 then means a real content
+    # error, not "endpoint missing").
+    markdown_supported: bool | None = None
 
 
 @asynccontextmanager
 async def app_lifespan(server: FastMCP) -> AsyncIterator[AppContext]:
     config = UBConfig.from_env()
     client = NotionClient(config.notion_secret)
-    note_types, note_types_source = await _discover_note_types(client, config)
-    tasks_schema = await _discover_tasks_schema(client, config)
+    # Schema discovery is strictly best-effort: it must NEVER prevent the
+    # server from starting. A crash here used to take down all 30 tools (the
+    # MCP client would connect, then list zero tools). Belt-and-suspenders on
+    # top of the per-function guards — any unforeseen error (parsing, network,
+    # interpreter quirk) degrades to static fallbacks instead of exit().
+    try:
+        note_types, note_types_source = await _discover_note_types(client, config)
+    except Exception as e:  # noqa: BLE001 — startup must not crash on discovery
+        print(
+            f"[ultimate-brain-mcp] Notes Type discovery crashed ({e!r}); "
+            f"using static NOTE_TYPES.",
+            file=sys.stderr,
+        )
+        note_types, note_types_source = list(NOTE_TYPES), "fallback"
+    try:
+        tasks_schema = await _discover_tasks_schema(client, config)
+    except Exception as e:  # noqa: BLE001 — startup must not crash on discovery
+        print(
+            f"[ultimate-brain-mcp] Tasks schema discovery crashed ({e!r}); "
+            f"location parameter will no-op for this session.",
+            file=sys.stderr,
+        )
+        tasks_schema = TasksSchema()
     try:
         yield AppContext(
             client=client,
@@ -120,6 +147,7 @@ async def _discover_note_types(
     """
     try:
         schema = await client.get_data_source(config.notes_ds_id)
+        options = extract_select_options(schema, NOTES_TYPE_PROP)
     except Exception as e:  # noqa: BLE001 — discovery is best-effort
         print(
             f"[ultimate-brain-mcp] Notes Type discovery failed ({e!r}); "
@@ -128,7 +156,6 @@ async def _discover_note_types(
         )
         return list(NOTE_TYPES), "fallback"
 
-    options = extract_select_options(schema, NOTES_TYPE_PROP)
     if not options:
         print(
             f"[ultimate-brain-mcp] Notes data source has no '{NOTES_TYPE_PROP}' "
@@ -154,6 +181,8 @@ async def _discover_tasks_schema(
     """
     try:
         schema = await client.get_data_source(config.tasks_ds_id)
+        location_meta = extract_property_metadata(schema, "Location")
+        labels_meta = extract_property_metadata(schema, "Labels")
     except Exception as e:  # noqa: BLE001 — discovery is best-effort
         print(
             f"[ultimate-brain-mcp] Tasks schema discovery failed ({e!r}); "
@@ -162,8 +191,6 @@ async def _discover_tasks_schema(
         )
         return TasksSchema()
 
-    location_meta = extract_property_metadata(schema, "Location")
-    labels_meta = extract_property_metadata(schema, "Labels")
     return TasksSchema(
         has_location_property=bool(location_meta.get("exists")),
         location_property_name=location_meta.get("name") if location_meta.get("exists") else None,
@@ -1070,16 +1097,16 @@ async def get_note_content(
     note_id: Annotated[str, Field(description="Note page ID.")],
     ctx: Context = None,
 ) -> dict:
-    """Get note properties plus the full page body as plain text.
+    """Get note properties plus the full page body as enhanced Markdown.
     Use search_notes to find note IDs."""
     app = _ctx(ctx)
     try:
-        page_fut = app.client.get_page(note_id)
-        blocks_fut = app.client.get_blocks(note_id, recursive=True)
-        page, blocks = await asyncio.gather(page_fut, blocks_fut)
-
+        page, content = await asyncio.gather(
+            app.client.get_page(note_id),
+            _read_page_markdown(app, note_id),
+        )
         result = format_note(page)
-        result["content"] = blocks_to_text(blocks)
+        result["content"] = content
         return result
     except NotionAPIError as e:
         return _handle_api_error(e, "Use search_notes to find valid note IDs.")
@@ -1595,53 +1622,234 @@ async def archive_item(
         return _handle_api_error(e, "Check the page ID is valid.")
 
 
+def _markdown_unsupported(err: NotionAPIError) -> bool:
+    """True if the error means the markdown endpoint/version is unavailable.
+
+    The page-markdown endpoints require API version 2026-03-11; on a workspace
+    that does not have it the route returns 400/404. We only fall back to the
+    legacy block path for those — auth (401/403), rate-limit/server (429/5xx,
+    already retried) and other errors propagate instead of being silently
+    masked by a different engine.
+    """
+    return err.status in (400, 404)
+
+
+async def _read_blocks_as_text(app: AppContext, page_id: str) -> str:
+    blocks = await app.client.get_blocks(page_id, recursive=True)
+    return blocks_to_text(blocks)
+
+
+async def _read_page_markdown(app: AppContext, page_id: str) -> str:
+    """Return a page body as enhanced Markdown via Notion's server-side endpoint.
+
+    Falls back to the local block-to-text converter only when the markdown
+    endpoint is genuinely unavailable on the workspace — detected on the first
+    version-unavailable error and remembered via ``app.markdown_supported``.
+    Once support is confirmed, errors surface instead of silently degrading.
+    Appends a notice when Notion reports truncation or unrendered blocks.
+    """
+    if app.markdown_supported is False:
+        return await _read_blocks_as_text(app, page_id)
+    try:
+        data = await app.client.get_page_markdown(page_id)
+    except NotionAPIError as err:
+        # Only treat as "endpoint absent" if we have not already confirmed
+        # support; otherwise this is a real error and must propagate.
+        if app.markdown_supported is None and _markdown_unsupported(err):
+            app.markdown_supported = False
+            return await _read_blocks_as_text(app, page_id)
+        raise
+    app.markdown_supported = True
+    markdown = data.get("markdown", "") or ""
+    if data.get("truncated"):
+        markdown += "\n\n_[content truncated by Notion — page exceeds the block limit]_"
+    unknown = data.get("unknown_block_ids") or []
+    if unknown:
+        markdown += (
+            f"\n\n_[{len(unknown)} block(s) could not be rendered as Markdown "
+            f"and are omitted: {', '.join(unknown)}]_"
+        )
+    return markdown
+
+
 @mcp.tool(
-    annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=True, idempotentHint=True)
+    # idempotent only in 'replace' mode; 'append' adds content each call.
+    annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=True, idempotentHint=False)
 )
 async def set_page_content(
     page_id: Annotated[str, Field(description="Page ID of any Notion page.")],
     content: Annotated[
         str,
         Field(description=(
-            "Page body content as markdown. Supports: # headings, - bullets, "
-            "1. numbered lists, - [ ] to-dos, ```code blocks```, > quotes, --- dividers, "
-            "and plain paragraphs."
+            "Page body content as enhanced Markdown. Supports # headings, "
+            "- bullets, 1. numbered lists, - [ ] to-dos, ```code blocks```, "
+            "> quotes, --- dividers, tables, and plain paragraphs. NOTE: rich "
+            "blocks (tables, toggles, deep nesting) only round-trip faithfully "
+            "in 'replace' mode; 'append' uses a simpler local converter."
         )),
     ],
     mode: Annotated[
         Literal["replace", "append"],
-        Field(description="'replace' removes existing content first (default). 'append' adds after existing content."),
+        Field(description="'replace' overwrites the whole page body (default). 'append' adds after existing content."),
     ] = "replace",
     ctx: Context = None,
 ) -> dict:
     """Set or update the body content of any page. Use 'replace' mode to overwrite
     existing content, or 'append' to add below it. Pass empty content with 'replace'
-    to clear the page body. Works on any page type (tasks, projects, notes, goals, etc.)."""
+    to clear the page body. Works on any page type (tasks, projects, notes, goals, etc.).
+
+    'replace' uses Notion's server-side Markdown endpoint (handles tables, toggles,
+    nesting, and block-splitting natively). 'append' uses the local block builder,
+    which only supports a subset of block types (no tables/toggles)."""
     app = _ctx(ctx)
-    new_blocks = text_to_blocks(content)
 
-    try:
+    async def _replace_via_blocks() -> dict:
+        new_blocks = text_to_blocks(content)
+        existing = await app.client.get_blocks(page_id)
         deleted = 0
-        if mode == "replace":
-            existing = await app.client.get_blocks(page_id)
-            if existing:
-                await _bounded_gather(
-                    [app.client.delete_block(b["id"]) for b in existing]
-                )
-                deleted = len(existing)
-
+        if existing:
+            await _bounded_gather(
+                [app.client.delete_block(b["id"]) for b in existing]
+            )
+            deleted = len(existing)
         if new_blocks:
             await app.client.append_blocks(page_id, new_blocks)
+        return {
+            "ok": True,
+            "page_id": page_id,
+            "mode": "replace",
+            "engine": "blocks",
+            "blocks_written": len(new_blocks),
+            "blocks_deleted": deleted,
+        }
 
+    try:
+        if mode == "replace":
+            # Known-unavailable workspace → block path directly.
+            if app.markdown_supported is False:
+                return await _replace_via_blocks()
+            try:
+                await app.client.replace_page_markdown(
+                    page_id, content, allow_deleting_content=True
+                )
+                app.markdown_supported = True
+                return {
+                    "ok": True,
+                    "page_id": page_id,
+                    "mode": mode,
+                    "engine": "markdown",
+                    "blocks_written": None,
+                    "blocks_deleted": None,
+                }
+            except NotionAPIError as err:
+                # Only fall back if we have NOT confirmed markdown support and the
+                # error looks like the endpoint is absent. Once support is known,
+                # a 400 means a real content error and must surface — never write
+                # silently-degraded content while reporting success.
+                if app.markdown_supported is None and _markdown_unsupported(err):
+                    app.markdown_supported = False
+                    return await _replace_via_blocks()
+                raise
+
+        # append mode — block builder
+        new_blocks = text_to_blocks(content)
+        if new_blocks:
+            await app.client.append_blocks(page_id, new_blocks)
         return {
             "ok": True,
             "page_id": page_id,
             "mode": mode,
+            "engine": "blocks",
             "blocks_written": len(new_blocks),
-            "blocks_deleted": deleted,
+            "blocks_deleted": 0,
         }
     except NotionAPIError as e:
         return _handle_api_error(e, "Check the page ID is valid.")
+
+
+@mcp.tool(
+    annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=True, idempotentHint=False)
+)
+async def patch_page_content(
+    page_id: Annotated[str, Field(description="Page ID of any Notion page.")],
+    edits: Annotated[
+        list[dict],
+        Field(description=(
+            "Up to 100 find-and-replace edits applied in order. Each is "
+            "{'old_str': <exact existing Markdown>, 'new_str': <replacement, "
+            "must be non-empty>, 'replace_all_matches': <bool, optional, default "
+            "false>}. old_str must match the page's current Markdown exactly (use "
+            "get_page_content to see it). To delete content, use set_page_content."
+        )),
+    ],
+    ctx: Context = None,
+) -> dict:
+    """Apply targeted find-and-replace edits to a page's body without rewriting
+    the whole page. Far cheaper than set_page_content for small changes (fix a
+    line, check off a to-do, update a value). Uses Notion's server-side Markdown
+    edit endpoint; old_str must match the current Markdown exactly.
+
+    Edits are applied one at a time, in order, against the document AS MUTATED by
+    the preceding edits (so overlapping edits compound). Each is reported
+    precisely: the result gives `edits_applied` and an `unmatched` list for edits
+    that found no match (skipped, not fatal — the rest still apply). If a hard
+    error occurs partway, the error payload still reports how far it got
+    (`edits_applied`/`unmatched` so far) since earlier edits already mutated the
+    page. Requires Notion API 2026-03-11 (no block fallback for this tool)."""
+    app = _ctx(ctx)
+    if not edits:
+        return _error("Provide at least one edit ({'old_str', 'new_str'}).")
+    if len(edits) > 100:
+        return _error("At most 100 edits per call.")
+    for i, e in enumerate(edits):
+        if not isinstance(e, dict):
+            return _error(f"edits[{i}] must be an object with 'old_str' and 'new_str'.")
+        if "old_str" not in e or "new_str" not in e:
+            return _error(f"edits[{i}] must have both 'old_str' and 'new_str'.")
+        if not isinstance(e["old_str"], str) or not isinstance(e["new_str"], str):
+            return _error(f"edits[{i}]: 'old_str' and 'new_str' must be strings.")
+        if not e["new_str"]:
+            return _error(
+                f"edits[{i}]: 'new_str' must be non-empty (deletion is not "
+                "supported here — use set_page_content to remove content)."
+            )
+        if "replace_all_matches" in e and not isinstance(e["replace_all_matches"], bool):
+            return _error(f"edits[{i}]: 'replace_all_matches' must be a boolean.")
+
+    # Apply individually: Notion 400s when a single edit matches nothing, but a
+    # multi-edit batch silently skips non-matching edits and still returns 200.
+    # Looping lets us report exactly which edits landed and which found no match.
+    # The "no matches found" detection relies on Notion's 400 message text (there
+    # is no machine-readable code distinguishing it from other validation_errors);
+    # any other error surfaces with the progress so far attached.
+    applied = 0
+    unmatched: list[dict] = []
+    for i, e in enumerate(edits):
+        try:
+            await app.client.update_page_markdown(page_id, [e])
+            applied += 1
+        except NotionAPIError as err:
+            if err.status == 400 and "no matches found" in str(err).lower():
+                unmatched.append({"index": i, "old_str": e["old_str"]})
+                continue
+            result = _handle_api_error(
+                err,
+                "The find-and-replace endpoint requires Notion API 2026-03-11. "
+                "If the page exists, check old_str matches the current Markdown "
+                "exactly — call get_page_content to see it.",
+            )
+            # Surface how far we got: edits before index i already mutated the page.
+            result["edits_applied"] = applied
+            result["unmatched"] = unmatched
+            result["failed_at_index"] = i
+            return result
+
+    return {
+        "ok": not unmatched,
+        "page_id": page_id,
+        "edits_applied": applied,
+        "unmatched": unmatched,
+    }
 
 
 # =========================================================================
@@ -2052,17 +2260,17 @@ async def get_page_content(
     page_id: Annotated[str, Field(description="Any Notion page ID.")],
     ctx: Context = None,
 ) -> dict:
-    """Get any page's properties plus its full body content as plain text.
+    """Get any page's properties plus its full body content as enhanced Markdown.
     Works for any page type. For notes specifically, get_note_content returns
     the same data with note-specific formatting."""
     app = _ctx(ctx)
     try:
-        page_fut = app.client.get_page(page_id)
-        blocks_fut = app.client.get_blocks(page_id, recursive=True)
-        page, blocks = await asyncio.gather(page_fut, blocks_fut)
-
+        page, content = await asyncio.gather(
+            app.client.get_page(page_id),
+            _read_page_markdown(app, page_id),
+        )
         result = format_generic_page(page)
-        result["content"] = blocks_to_text(blocks)
+        result["content"] = content
         return result
     except NotionAPIError as e:
         return _handle_api_error(e, "Check the page ID is valid.")

@@ -125,8 +125,12 @@ async def test_set_page_content_replace_300_blocks(server_params, _check_env):
                 )
                 replace_data = _parse_result(replace_result)
                 assert replace_data.get("ok") is True, f"replace failed: {replace_data}"
-                assert replace_data["blocks_written"] == 200
-                assert replace_data["blocks_deleted"] == 120
+                # Replace uses Notion's server-side markdown engine, which does
+                # the block-splitting internally and reports no block counts.
+                # The legacy block path (used only as a fallback) still does.
+                if replace_data.get("engine") == "blocks":
+                    assert replace_data["blocks_written"] == 200
+                    assert replace_data["blocks_deleted"] == 120
 
                 # Verify new content is present and old content is gone.
                 read_result = await session.call_tool(
