@@ -1,0 +1,51 @@
+name: Bug report
+description: Report a problem with a tool or the MCP server
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for filing a bug. Please include enough detail to reproduce it.
+  - type: input
+    id: tool
+    attributes:
+      label: Which tool / area?
+      description: The MCP tool name (e.g. `search_tasks`, `update_task`) or "server / setup".
+      placeholder: search_tasks
+    validations:
+      required: true
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: What did you expect, and what happened instead?
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      description: The prompt / tool call and arguments that triggered it.
+      render: text
+    validations:
+      required: true
+  - type: textarea
+    id: notion-error
+    attributes:
+      label: Notion API error (if any)
+      description: Paste any `NotionAPIError` message / HTTP status returned.
+      render: text
+    validations:
+      required: false
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: Package version (`pip show ultimate-brain-mcp` or git SHA), Python version, OS.
+      placeholder: |
+        ultimate-brain-mcp 0.5.1
+        Python 3.12
+        macOS 15
+    validations:
+      required: false
