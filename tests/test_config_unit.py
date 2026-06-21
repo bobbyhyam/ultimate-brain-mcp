@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import os
-
 import pytest
 
 from ultimate_brain_mcp.config import UBConfig, extract_property_metadata

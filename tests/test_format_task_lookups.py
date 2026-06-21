@@ -117,9 +117,7 @@ def _with_location(page: dict, prop_name: str, prop: dict) -> dict:
 
 def test_format_task_location_select():
     """A select-typed Location property is surfaced as a string."""
-    page = _with_location(
-        _task_page(), "Location", {"type": "select", "select": {"name": "Home"}}
-    )
+    page = _with_location(_task_page(), "Location", {"type": "select", "select": {"name": "Home"}})
 
     task = format_task(page, location_property_name="Location")
 
@@ -152,9 +150,7 @@ def test_format_task_location_multi_select():
 
 def test_format_task_location_omitted_without_name():
     """Without location_property_name, location is never added (legacy shape)."""
-    page = _with_location(
-        _task_page(), "Location", {"type": "select", "select": {"name": "Home"}}
-    )
+    page = _with_location(_task_page(), "Location", {"type": "select", "select": {"name": "Home"}})
 
     task = format_task(page)
 
@@ -170,9 +166,7 @@ def test_format_task_location_absent_when_property_missing():
 
 def test_format_task_location_absent_when_empty():
     """An empty Location value yields no location field."""
-    page = _with_location(
-        _task_page(), "Location", {"type": "select", "select": None}
-    )
+    page = _with_location(_task_page(), "Location", {"type": "select", "select": None})
 
     task = format_task(page, location_property_name="Location")
 

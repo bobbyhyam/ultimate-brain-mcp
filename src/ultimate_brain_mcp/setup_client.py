@@ -158,9 +158,7 @@ async def discover(secret: str) -> dict[str, str]:
 def config_path_for(client: str, scope: str | None) -> str:
     """Return the absolute path to the target config file."""
     if client == "claude-desktop":
-        return os.path.expanduser(
-            "~/Library/Application Support/Claude/claude_desktop_config.json"
-        )
+        return os.path.expanduser("~/Library/Application Support/Claude/claude_desktop_config.json")
     # claude-code
     if scope == "project":
         return os.path.join(os.getcwd(), ".mcp.json")

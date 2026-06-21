@@ -15,6 +15,9 @@ from ultimate_brain_mcp.formatters import (
 )
 from ultimate_brain_mcp.notion_client import NotionClient
 
+# Whole module exercises the live Notion API — deselected by default (-m 'not live').
+pytestmark = pytest.mark.live
+
 
 @pytest.mark.asyncio
 async def test_format_task(notion_client: NotionClient, ub_config: UBConfig):

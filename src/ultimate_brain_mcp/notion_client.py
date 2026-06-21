@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import asyncio
 import copy
+from typing import Any
 
 import httpx
 
@@ -163,9 +164,7 @@ class NotionClient:
     and rate limit (~3 req/sec) transparently.
     """
 
-    def __init__(
-        self, secret: str, *, rate_per_sec: float = DEFAULT_RATE_PER_SEC
-    ) -> None:
+    def __init__(self, secret: str, *, rate_per_sec: float = DEFAULT_RATE_PER_SEC) -> None:
         self._client = httpx.AsyncClient(
             base_url=NOTION_BASE,
             headers={
@@ -190,7 +189,7 @@ class NotionClient:
         url: str,
         *,
         notion_version: str | None = None,
-        **kwargs: object,
+        **kwargs: Any,
     ) -> httpx.Response:
         # Per-call API version override. The client default (2025-09-03) is set
         # on the AsyncClient; passing notion_version layers an endpoint-specific
@@ -321,9 +320,7 @@ class NotionClient:
         try:
             resp = await self._request("POST", "/pages", json=body)
         except NotionAPIError as e:
-            raise PartialWriteError(
-                e, written=0, remaining=len(top), page_id=""
-            ) from e
+            raise PartialWriteError(e, written=0, remaining=len(top), page_id="") from e
 
         page = resp.json()
         page_id = page["id"]
@@ -365,9 +362,7 @@ class NotionClient:
 
     async def update_page(self, page_id: str, properties: dict) -> dict:
         """PATCH /v1/pages/{page_id}"""
-        resp = await self._request(
-            "PATCH", f"/pages/{page_id}", json={"properties": properties}
-        )
+        resp = await self._request("PATCH", f"/pages/{page_id}", json={"properties": properties})
         return resp.json()
 
     # ------------------------------------------------------------------
@@ -467,9 +462,7 @@ class NotionClient:
             params: dict = {"page_size": page_size}
             if cursor:
                 params["start_cursor"] = cursor
-            resp = await self._request(
-                "GET", f"/blocks/{block_id}/children", params=params
-            )
+            resp = await self._request("GET", f"/blocks/{block_id}/children", params=params)
             data = resp.json()
             all_blocks.extend(data.get("results", []))
             if not data.get("has_more"):
@@ -480,18 +473,14 @@ class NotionClient:
             for block in all_blocks:
                 if not block.get("has_children"):
                     continue
-                children = await self.get_blocks(
-                    block["id"], page_size=page_size, recursive=True
-                )
+                children = await self.get_blocks(block["id"], page_size=page_size, recursive=True)
                 btype = block.get("type", "")
                 if btype:
                     block.setdefault(btype, {})["children"] = children
 
         return all_blocks
 
-    async def append_blocks(
-        self, block_id: str, children: list[dict]
-    ) -> list[dict]:
+    async def append_blocks(self, block_id: str, children: list[dict]) -> list[dict]:
         """PATCH /v1/blocks/{block_id}/children — append child blocks.
 
         Accepts arbitrarily large/deep *children*. Splits subtrees deeper

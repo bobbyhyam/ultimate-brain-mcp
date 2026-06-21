@@ -98,9 +98,9 @@ async def test_notion_version_override_does_not_leak():
     stable default version (no per-client header mutation)."""
     client, reqs = _client_with_recorder()
     try:
-        await client.get_page("PID")            # normal
-        await client.get_page_markdown("PID")   # override
-        await client.get_page("PID")            # normal again
+        await client.get_page("PID")  # normal
+        await client.get_page_markdown("PID")  # override
+        await client.get_page("PID")  # normal again
     finally:
         await client.close()
     versions = [r.headers["Notion-Version"] for r in reqs]

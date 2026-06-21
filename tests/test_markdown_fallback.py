@@ -51,7 +51,9 @@ class FakeClient:
         edit = content_updates[0]
         self.calls.append(("update_page_markdown", page_id, edit["old_str"]))
         if edit["old_str"] not in self.matchable:
-            raise NotionAPIError(400, "validation_error", f"No matches found for {edit['old_str']}.")
+            raise NotionAPIError(
+                400, "validation_error", f"No matches found for {edit['old_str']}."
+            )
         return {"object": "page_markdown", "markdown": "updated"}
 
     async def get_blocks(self, block_id, *, page_size=100, recursive=False):
@@ -154,9 +156,7 @@ async def test_set_page_content_replace_markdown_happy_path():
     client = FakeClient(markdown_raises=False)
     ctx = _ctx(_app(client))
 
-    result = await server.set_page_content(
-        page_id="pid", content="Body.", mode="replace", ctx=ctx
-    )
+    result = await server.set_page_content(page_id="pid", content="Body.", mode="replace", ctx=ctx)
 
     assert result["ok"] is True
     assert result["engine"] == "markdown"
@@ -190,9 +190,7 @@ async def test_set_page_content_replace_does_not_fallback_on_real_error(status):
     client = FakeClient(markdown_raises=True, markdown_error_status=status, blocks=[{"id": "b"}])
     ctx = _ctx(_app(client))
 
-    result = await server.set_page_content(
-        page_id="pid", content="x", mode="replace", ctx=ctx
-    )
+    result = await server.set_page_content(page_id="pid", content="x", mode="replace", ctx=ctx)
     # _handle_api_error returns an error dict, and no block ops ran
     assert "error" in result
     assert all(c[0] not in ("get_blocks", "delete_block", "append_blocks") for c in client.calls)
@@ -221,9 +219,7 @@ async def test_replace_confirmed_supported_400_surfaces_not_fallback():
     client = FakeClient(markdown_raises=True, markdown_error_status=400, blocks=[{"id": "b"}])
     ctx = _ctx(_app(client, markdown_supported=True))
 
-    result = await server.set_page_content(
-        page_id="pid", content="x", mode="replace", ctx=ctx
-    )
+    result = await server.set_page_content(page_id="pid", content="x", mode="replace", ctx=ctx)
     assert "error" in result
     assert "ok" not in result  # not a silent success
     assert all(c[0] not in ("get_blocks", "delete_block", "append_blocks") for c in client.calls)
@@ -239,7 +235,9 @@ async def test_first_success_sets_supported_flag():
 
 @pytest.mark.asyncio
 async def test_known_unsupported_skips_markdown_call():
-    client = FakeClient(blocks=[{"type": "paragraph", "paragraph": {"rich_text": [{"plain_text": "b"}]}}])
+    client = FakeClient(
+        blocks=[{"type": "paragraph", "paragraph": {"rich_text": [{"plain_text": "b"}]}}]
+    )
     app = _app(client, markdown_supported=False)
     await server._read_page_markdown(app, "pid")
     # Never even attempted the markdown endpoint
@@ -254,11 +252,13 @@ async def test_known_unsupported_skips_markdown_call():
 
 @pytest.mark.asyncio
 async def test_read_markdown_unknown_block_ids_notice():
-    client = FakeClient(page_markdown={
-        "markdown": "body",
-        "truncated": False,
-        "unknown_block_ids": ["abc", "def"],
-    })
+    client = FakeClient(
+        page_markdown={
+            "markdown": "body",
+            "truncated": False,
+            "unknown_block_ids": ["abc", "def"],
+        }
+    )
     text = await server._read_page_markdown(_app(client), "pid")
     assert text.startswith("body")
     assert "could not be rendered" in text
@@ -305,7 +305,9 @@ async def test_patch_real_error_propagates():
     """A non-'no matches' API error surfaces instead of being recorded as unmatched."""
 
     class BoomClient(FakeClient):
-        async def update_page_markdown(self, page_id, content_updates, *, allow_deleting_content=False):
+        async def update_page_markdown(
+            self, page_id, content_updates, *, allow_deleting_content=False
+        ):
             raise NotionAPIError(404, "object_not_found", "page not found")
 
     ctx = _ctx(_app(BoomClient()))
@@ -325,7 +327,9 @@ async def test_patch_hard_error_midloop_reports_progress():
             super().__init__()
             self.n = 0
 
-        async def update_page_markdown(self, page_id, content_updates, *, allow_deleting_content=False):
+        async def update_page_markdown(
+            self, page_id, content_updates, *, allow_deleting_content=False
+        ):
             self.n += 1
             if self.n == 1:
                 return {"object": "page_markdown"}  # first edit lands
@@ -344,14 +348,17 @@ async def test_patch_hard_error_midloop_reports_progress():
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("bad_edits, frag", [
-    ([], "at least one"),
-    ([{"old_str": "a"}], "both"),
-    ([{"old_str": "a", "new_str": 5}], "strings"),
-    ([{"old_str": "a", "new_str": ""}], "non-empty"),
-    (["notadict"], "object"),
-    ([{"old_str": "a", "new_str": "b", "replace_all_matches": "yes"}], "boolean"),
-])
+@pytest.mark.parametrize(
+    "bad_edits, frag",
+    [
+        ([], "at least one"),
+        ([{"old_str": "a"}], "both"),
+        ([{"old_str": "a", "new_str": 5}], "strings"),
+        ([{"old_str": "a", "new_str": ""}], "non-empty"),
+        (["notadict"], "object"),
+        ([{"old_str": "a", "new_str": "b", "replace_all_matches": "yes"}], "boolean"),
+    ],
+)
 async def test_patch_validation_rejects_malformed(bad_edits, frag):
     ctx = _ctx(_app(FakeClient()))
     result = await server.patch_page_content(page_id="pid", edits=bad_edits, ctx=ctx)

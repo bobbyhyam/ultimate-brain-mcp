@@ -7,6 +7,7 @@ and a generic formatter that auto-extracts all Notion property types.
 from __future__ import annotations
 
 import re
+from collections.abc import Callable
 
 from markdown_it import MarkdownIt
 
@@ -138,9 +139,7 @@ def _truncated_relations(page: dict) -> list[str]:
     return [
         name
         for name, prop in page.get("properties", {}).items()
-        if isinstance(prop, dict)
-        and prop.get("type") == "relation"
-        and prop.get("has_more")
+        if isinstance(prop, dict) and prop.get("type") == "relation" and prop.get("has_more")
     ]
 
 
@@ -226,6 +225,7 @@ def format_task(
         loc_prop = props.get(location_property_name)
         if loc_prop:
             ptype = loc_prop.get("type")
+            val: str | list[str] | None
             if ptype == "select":
                 val = _select(loc_prop)
             elif ptype == "status":
@@ -349,7 +349,7 @@ def format_goal(page: dict) -> dict:
 # Generic formatter — auto-extracts all property types
 # ---------------------------------------------------------------------------
 
-_EXTRACTORS: dict[str, callable] = {
+_EXTRACTORS: dict[str, Callable] = {
     "title": _title,
     "rich_text": _rich_text,
     "select": _select,
@@ -443,7 +443,9 @@ def blocks_to_text(blocks: list[dict], *, _indent: int = 0) -> str:
 _NOTION_TEXT_LIMIT = 2000
 
 
-def _plain_segment(content: str, annotations: dict | None = None, link_url: str | None = None) -> dict:
+def _plain_segment(
+    content: str, annotations: dict | None = None, link_url: str | None = None
+) -> dict:
     """Create a single rich_text segment with optional annotations and link."""
     seg: dict = {
         "type": "text",
@@ -508,8 +510,10 @@ def _chunk_segments(segments: list[dict]) -> list[dict]:
         link = seg["text"].get("link")
         link_url = link["url"] if link else None
         for i in range(0, len(content), _NOTION_TEXT_LIMIT):
-            chunk = content[i:i + _NOTION_TEXT_LIMIT]
-            result.append(_plain_segment(chunk, dict(annotations) if annotations else None, link_url))
+            chunk = content[i : i + _NOTION_TEXT_LIMIT]
+            result.append(
+                _plain_segment(chunk, dict(annotations) if annotations else None, link_url)
+            )
     return result
 
 
@@ -526,7 +530,7 @@ def _make_rich_text(text: str, *, parse_markdown: bool = True) -> list[dict]:
     if not parse_markdown:
         chunks: list[dict] = []
         for i in range(0, len(text), _NOTION_TEXT_LIMIT):
-            chunk = text[i:i + _NOTION_TEXT_LIMIT]
+            chunk = text[i : i + _NOTION_TEXT_LIMIT]
             chunks.append(_plain_segment(chunk))
         return chunks
 
@@ -545,7 +549,11 @@ def _make_rich_text(text: str, *, parse_markdown: bool = True) -> list[dict]:
 
 
 def _block_paragraph(text: str) -> dict:
-    return {"object": "block", "type": "paragraph", "paragraph": {"rich_text": _make_rich_text(text)}}
+    return {
+        "object": "block",
+        "type": "paragraph",
+        "paragraph": {"rich_text": _make_rich_text(text)},
+    }
 
 
 def _block_heading(text: str, level: int) -> dict:
@@ -554,19 +562,35 @@ def _block_heading(text: str, level: int) -> dict:
 
 
 def _block_bulleted_list_item(text: str) -> dict:
-    return {"object": "block", "type": "bulleted_list_item", "bulleted_list_item": {"rich_text": _make_rich_text(text)}}
+    return {
+        "object": "block",
+        "type": "bulleted_list_item",
+        "bulleted_list_item": {"rich_text": _make_rich_text(text)},
+    }
 
 
 def _block_numbered_list_item(text: str) -> dict:
-    return {"object": "block", "type": "numbered_list_item", "numbered_list_item": {"rich_text": _make_rich_text(text)}}
+    return {
+        "object": "block",
+        "type": "numbered_list_item",
+        "numbered_list_item": {"rich_text": _make_rich_text(text)},
+    }
 
 
 def _block_to_do(text: str, checked: bool = False) -> dict:
-    return {"object": "block", "type": "to_do", "to_do": {"rich_text": _make_rich_text(text), "checked": checked}}
+    return {
+        "object": "block",
+        "type": "to_do",
+        "to_do": {"rich_text": _make_rich_text(text), "checked": checked},
+    }
 
 
 def _block_code(text: str, language: str = "plain text") -> dict:
-    return {"object": "block", "type": "code", "code": {"rich_text": _make_rich_text(text, parse_markdown=False), "language": language}}
+    return {
+        "object": "block",
+        "type": "code",
+        "code": {"rich_text": _make_rich_text(text, parse_markdown=False), "language": language},
+    }
 
 
 def _block_quote(text: str) -> dict:

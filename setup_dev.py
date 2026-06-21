@@ -136,7 +136,13 @@ async def main() -> None:
     write_env(secret, discovered)
 
     # Report
-    required = ["UB_TASKS_DS_ID", "UB_PROJECTS_DS_ID", "UB_NOTES_DS_ID", "UB_TAGS_DS_ID", "UB_GOALS_DS_ID"]
+    required = [
+        "UB_TASKS_DS_ID",
+        "UB_PROJECTS_DS_ID",
+        "UB_NOTES_DS_ID",
+        "UB_TAGS_DS_ID",
+        "UB_GOALS_DS_ID",
+    ]
     found_required = [v for v in required if v in discovered]
     missing_required = [v for v in required if v not in discovered]
 
@@ -153,7 +159,9 @@ async def main() -> None:
         print("\nAll required data sources discovered. Ready to run!")
         print("  uv run ultimate-brain-mcp")
     else:
-        print("\nSome required data sources are missing. Check your Notion integration permissions.")
+        print(
+            "\nSome required data sources are missing. Check your Notion integration permissions."
+        )
 
 
 if __name__ == "__main__":

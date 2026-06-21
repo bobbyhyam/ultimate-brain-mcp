@@ -19,9 +19,19 @@ TAG_TYPES = ["Area", "Resource", "Entity"]
 # when live discovery from the Notion data source schema fails at server
 # startup; the live list is preferred and lives on AppContext.note_types.
 NOTE_TYPES = [
-    "Journal", "Meeting", "Web Clip", "Lecture", "Reference",
-    "Book", "Idea", "Plan", "Recipe", "Voice Note",
-    "Daily", "Note", "Brainstorm",
+    "Journal",
+    "Meeting",
+    "Web Clip",
+    "Lecture",
+    "Reference",
+    "Book",
+    "Idea",
+    "Plan",
+    "Recipe",
+    "Voice Note",
+    "Daily",
+    "Note",
+    "Brainstorm",
 ]
 
 # Property name on the Notes data source that holds the Type select.
@@ -69,12 +79,9 @@ def extract_property_metadata(schema: dict, prop_name: str) -> dict:
     options: list[str] = []
     if ptype in ("select", "multi_select", "status"):
         raw_options = prop.get(ptype, {}).get("options", [])
-        options = [
-            opt["name"]
-            for opt in raw_options
-            if isinstance(opt, dict) and "name" in opt
-        ]
+        options = [opt["name"] for opt in raw_options if isinstance(opt, dict) and "name" in opt]
     return {"exists": True, "name": prop_name, "type": ptype, "options": options}
+
 
 # ---------------------------------------------------------------------------
 # Secondary database registry — maps friendly name → env var
@@ -145,11 +152,7 @@ class UBConfig:
 
         # Workspace timezone — UB_TIMEZONE wins, then TZ, then UTC.
         # Validated against the system tz database; typos fail fast at startup.
-        tz_name = (
-            os.environ.get("UB_TIMEZONE")
-            or os.environ.get("TZ")
-            or "UTC"
-        )
+        tz_name = os.environ.get("UB_TIMEZONE") or os.environ.get("TZ") or "UTC"
         try:
             ZoneInfo(tz_name)
         except (ZoneInfoNotFoundError, ValueError) as e:
