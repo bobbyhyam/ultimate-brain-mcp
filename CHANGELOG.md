@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.3] - 2026-06-21
+
+### Added
+
+- Restore the `ub` skill (`.claude/skills/ub/SKILL.md`) so the `release-skill`
+  workflow can build and attach the `ultimate-brain-mcp.skill` release asset
+  again. Updated to a proactive, system-of-record capture skill for goals,
+  projects, tasks, and notes.
+
 ## [0.5.2] - 2026-06-21
 
 ### Added
@@ -44,7 +53,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `daily_review_snapshot` and `bulk_update_tasks` workflow consolidator tools.
 
-[Unreleased]: https://github.com/bobbyhyam/ultimate-brain-mcp/compare/v0.5.2...HEAD
+[Unreleased]: https://github.com/bobbyhyam/ultimate-brain-mcp/compare/v0.5.3...HEAD
+[0.5.3]: https://github.com/bobbyhyam/ultimate-brain-mcp/compare/v0.5.2...v0.5.3
 [0.5.2]: https://github.com/bobbyhyam/ultimate-brain-mcp/compare/v0.5.1...v0.5.2
 [0.5.1]: https://github.com/bobbyhyam/ultimate-brain-mcp/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/bobbyhyam/ultimate-brain-mcp/releases/tag/v0.5.0
