@@ -30,10 +30,18 @@ uv run pytest tests/test_tools.py -k test_search_tasks
 # Build for distribution
 uv build
 
-# Release a new version (bumps version, commits, tags, pushes)
+# Release a new version (PR-based flow)
+# Bumps version + rolls CHANGELOG + updates uv.lock on a release/vX.Y.Z branch,
+# opens an auto-merge PR, waits for it to merge, then tags to trigger publish.
 ./scripts/release.sh <major|minor|patch> "<commit message>"
-./scripts/release.sh patch "Fix bug" --dry-run  # local only, no push
+./scripts/release.sh patch "Fix bug" --dry-run  # branch + commit locally, no push/PR/tag
+./scripts/release.sh patch "Fix bug" --no-wait   # open the PR but don't block; tag manually after merge
 ```
+
+Releases go through the same branch protection + CI gate as any change (the
+release commit must pass CI before it merges to `main`). The `v*` tag pushed
+after merge triggers `publish.yml` (PyPI publish via OIDC + skill-archive asset).
+Requires `gh` authenticated and repo auto-merge enabled.
 
 ## Environment Setup
 
