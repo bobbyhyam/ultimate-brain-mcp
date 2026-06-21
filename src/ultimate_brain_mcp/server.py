@@ -110,8 +110,7 @@ async def app_lifespan(server: FastMCP) -> AsyncIterator[AppContext]:
         note_types, note_types_source = await _discover_note_types(client, config)
     except Exception as e:  # noqa: BLE001 — startup must not crash on discovery
         print(
-            f"[ultimate-brain-mcp] Notes Type discovery crashed ({e!r}); "
-            f"using static NOTE_TYPES.",
+            f"[ultimate-brain-mcp] Notes Type discovery crashed ({e!r}); using static NOTE_TYPES.",
             file=sys.stderr,
         )
         note_types, note_types_source = list(NOTE_TYPES), "fallback"
@@ -166,9 +165,7 @@ async def _discover_note_types(
     return options, "discovered"
 
 
-async def _discover_tasks_schema(
-    client: NotionClient, config: UBConfig
-) -> TasksSchema:
+async def _discover_tasks_schema(client: NotionClient, config: UBConfig) -> TasksSchema:
     """Introspect the Tasks data source for Location + Labels metadata.
 
     Only inspects properties relevant to the workflows that need this
@@ -222,7 +219,11 @@ mcp = FastMCP(
 # ---------------------------------------------------------------------------
 
 
-def _ctx(ctx: Context) -> AppContext:
+def _ctx(ctx: Context | None) -> AppContext:
+    # FastMCP injects ctx at call time, so it is never None in practice; the
+    # `Context | None` annotation only reflects the `ctx: Context = None`
+    # sentinel default on the tool signatures.
+    assert ctx is not None
     return ctx.request_context.lifespan_context
 
 
@@ -272,9 +273,7 @@ def _handle_api_error(e: NotionAPIError, hint: str = "") -> dict:
     return err
 
 
-async def _bounded_gather(
-    coros: list, *, limit: int = _DELETE_CONCURRENCY
-) -> None:
+async def _bounded_gather(coros: list, *, limit: int = _DELETE_CONCURRENCY) -> None:
     """Run *coros* with at most *limit* concurrent in flight."""
     sem = asyncio.Semaphore(limit)
 
@@ -333,9 +332,7 @@ def _prop_relation(ids: list[str]) -> dict:
     return {"relation": [{"id": i} for i in ids]}
 
 
-def _build_location_payload(
-    schema: TasksSchema, value: str
-) -> tuple[dict | None, str | None]:
+def _build_location_payload(schema: TasksSchema, value: str) -> tuple[dict | None, str | None]:
     """Construct the Notion property payload for the ``location`` parameter.
 
     Returns ``(payload, warning)``:
@@ -378,7 +375,9 @@ def _build_location_payload(
 async def search_tasks(
     status: Annotated[
         str | None,
-        Field(description=f"Filter by status. Options: {', '.join(TASK_STATUSES)}. Omit for non-Done tasks."),
+        Field(
+            description=f"Filter by status. Options: {', '.join(TASK_STATUSES)}. Omit for non-Done tasks."
+        ),
     ] = None,
     project_id: Annotated[
         str | None,
@@ -402,14 +401,18 @@ async def search_tasks(
     ] = None,
     due_after: Annotated[
         str | None,
-        Field(description="Due date on or after this date (YYYY-MM-DD). Combine with due_before for a range."),
+        Field(
+            description="Due date on or after this date (YYYY-MM-DD). Combine with due_before for a range."
+        ),
     ] = None,
     due_on: Annotated[
         str | None,
-        Field(description=(
-            "Due date equals this single day (YYYY-MM-DD). Mutually exclusive with "
-            "due_before and due_after — use those for ranges, this for a single day."
-        )),
+        Field(
+            description=(
+                "Due date equals this single day (YYYY-MM-DD). Mutually exclusive with "
+                "due_before and due_after — use those for ranges, this for a single day."
+            )
+        ),
     ] = None,
     parent_task_id: Annotated[
         str | None,
@@ -421,11 +424,15 @@ async def search_tasks(
     ] = None,
     completed_before: Annotated[
         str | None,
-        Field(description="Completion date on or before this date (YYYY-MM-DD). Best combined with status='Done'."),
+        Field(
+            description="Completion date on or before this date (YYYY-MM-DD). Best combined with status='Done'."
+        ),
     ] = None,
     completed_after: Annotated[
         str | None,
-        Field(description="Completion date on or after this date (YYYY-MM-DD). Best combined with status='Done'."),
+        Field(
+            description="Completion date on or after this date (YYYY-MM-DD). Best combined with status='Done'."
+        ),
     ] = None,
     limit: Annotated[
         int,
@@ -477,9 +484,7 @@ async def search_tasks(
     sorts = [{"property": "Due", "direction": "ascending"}]
 
     try:
-        pages = await app.client.query_all(
-            app.config.tasks_ds_id, filter=query_filter, sorts=sorts
-        )
+        pages = await app.client.query_all(app.config.tasks_ds_id, filter=query_filter, sorts=sorts)
         loc_name = app.tasks_schema.location_property_name
         return [format_task(p, location_property_name=loc_name) for p in pages[:limit]]
     except NotionAPIError as e:
@@ -571,27 +576,33 @@ async def create_task(
     ] = None,
     tag_ids: Annotated[
         list[str] | None,
-        Field(description=(
-            "Tag page IDs to link via the Tag relation (PARA Area / Resource / Entity). "
-            "Use search_tags to find IDs. Distinct from labels (multi-select strings)."
-        )),
+        Field(
+            description=(
+                "Tag page IDs to link via the Tag relation (PARA Area / Resource / Entity). "
+                "Use search_tags to find IDs. Distinct from labels (multi-select strings)."
+            )
+        ),
     ] = None,
     location: Annotated[
         str | None,
-        Field(description=(
-            "Sets the Tasks Location property. Auto-detects select / multi_select / status type. "
-            "Only valid when Tasks has a Location property — check "
-            "daily_review_snapshot.task_schema.has_location_property first. "
-            "If location lives in Labels in this workspace, pass it via labels=[...] instead."
-        )),
+        Field(
+            description=(
+                "Sets the Tasks Location property. Auto-detects select / multi_select / status type. "
+                "Only valid when Tasks has a Location property — check "
+                "daily_review_snapshot.task_schema.has_location_property first. "
+                "If location lives in Labels in this workspace, pass it via labels=[...] instead."
+            )
+        ),
     ] = None,
     content: Annotated[
         str | None,
-        Field(description=(
-            "Page body content as markdown. Supports: # headings, - bullets, "
-            "1. numbered lists, - [ ] to-dos, ```code blocks```, > quotes, --- dividers, "
-            "and plain paragraphs."
-        )),
+        Field(
+            description=(
+                "Page body content as markdown. Supports: # headings, - bullets, "
+                "1. numbered lists, - [ ] to-dos, ```code blocks```, > quotes, --- dividers, "
+                "and plain paragraphs."
+            )
+        ),
     ] = None,
     ctx: Context = None,
 ) -> dict:
@@ -631,9 +642,7 @@ async def create_task(
 
     try:
         page = await app.client.create_page(app.config.tasks_ds_id, props, children=children)
-        result = format_task(
-            page, location_property_name=app.tasks_schema.location_property_name
-        )
+        result = format_task(page, location_property_name=app.tasks_schema.location_property_name)
         if location_warning:
             result["_warning"] = location_warning
         return result
@@ -660,7 +669,9 @@ async def update_task(
         Field(description=f"New priority. Options: {', '.join(TASK_PRIORITIES)}."),
     ] = None,
     project_id: Annotated[str | None, Field(description="New project page ID.")] = None,
-    labels: Annotated[list[str] | None, Field(description="New labels (replaces existing).")] = None,
+    labels: Annotated[
+        list[str] | None, Field(description="New labels (replaces existing).")
+    ] = None,
     my_day: Annotated[bool | None, Field(description="Set My Day flag.")] = None,
     parent_task_id: Annotated[
         str | None,
@@ -668,19 +679,23 @@ async def update_task(
     ] = None,
     tag_ids: Annotated[
         list[str] | None,
-        Field(description=(
-            "New Tag relation IDs (replaces existing). Use search_tags to find IDs. "
-            "Distinct from labels (multi-select strings)."
-        )),
+        Field(
+            description=(
+                "New Tag relation IDs (replaces existing). Use search_tags to find IDs. "
+                "Distinct from labels (multi-select strings)."
+            )
+        ),
     ] = None,
     location: Annotated[
         str | None,
-        Field(description=(
-            "Sets the Tasks Location property. Auto-detects select / multi_select / status type. "
-            "Only valid when Tasks has a Location property — check "
-            "daily_review_snapshot.task_schema.has_location_property first. "
-            "If location lives in Labels in this workspace, pass it via labels=[...] instead."
-        )),
+        Field(
+            description=(
+                "Sets the Tasks Location property. Auto-detects select / multi_select / status type. "
+                "Only valid when Tasks has a Location property — check "
+                "daily_review_snapshot.task_schema.has_location_property first. "
+                "If location lives in Labels in this workspace, pass it via labels=[...] instead."
+            )
+        ),
     ] = None,
     ctx: Context = None,
 ) -> dict:
@@ -723,9 +738,7 @@ async def update_task(
 
     try:
         page = await app.client.update_page(task_id, props)
-        result = format_task(
-            page, location_property_name=app.tasks_schema.location_property_name
-        )
+        result = format_task(page, location_property_name=app.tasks_schema.location_property_name)
         if location_warning:
             result["_warning"] = location_warning
         return result
@@ -819,7 +832,9 @@ def _advance_date(current: str, recurrence: str) -> str | None:
 async def search_projects(
     status: Annotated[
         str | None,
-        Field(description=f"Filter by status. Options: {', '.join(PROJECT_STATUSES)}. Omit for active projects (Doing + Ongoing)."),
+        Field(
+            description=f"Filter by status. Options: {', '.join(PROJECT_STATUSES)}. Omit for active projects (Doing + Ongoing)."
+        ),
     ] = None,
     tag_id: Annotated[
         str | None,
@@ -843,11 +858,15 @@ async def search_projects(
     ] = None,
     completed_before: Annotated[
         str | None,
-        Field(description="Completion date on or before this date (YYYY-MM-DD). Best combined with status='Complete'."),
+        Field(
+            description="Completion date on or before this date (YYYY-MM-DD). Best combined with status='Complete'."
+        ),
     ] = None,
     completed_after: Annotated[
         str | None,
-        Field(description="Completion date on or after this date (YYYY-MM-DD). Best combined with status='Complete'."),
+        Field(
+            description="Completion date on or after this date (YYYY-MM-DD). Best combined with status='Complete'."
+        ),
     ] = None,
     archived: Annotated[
         bool | None,
@@ -868,12 +887,14 @@ async def search_projects(
     if status:
         filters.append({"property": "Status", "status": {"equals": status}})
     else:
-        filters.append({
-            "or": [
-                {"property": "Status", "status": {"equals": "Doing"}},
-                {"property": "Status", "status": {"equals": "Ongoing"}},
-            ]
-        })
+        filters.append(
+            {
+                "or": [
+                    {"property": "Status", "status": {"equals": "Doing"}},
+                    {"property": "Status", "status": {"equals": "Ongoing"}},
+                ]
+            }
+        )
 
     if tag_id:
         filters.append({"property": "Tag", "relation": {"contains": tag_id}})
@@ -959,18 +980,22 @@ async def create_project(
     name: Annotated[str, Field(description="Project name.")],
     status: Annotated[
         str | None,
-        Field(description=f"Status. Options: {', '.join(PROJECT_STATUSES)}. Defaults to Not Started."),
+        Field(
+            description=f"Status. Options: {', '.join(PROJECT_STATUSES)}. Defaults to Not Started."
+        ),
     ] = None,
     deadline: Annotated[str | None, Field(description="Deadline in YYYY-MM-DD format.")] = None,
     tag_id: Annotated[str | None, Field(description="Tag page ID to link.")] = None,
     goal_id: Annotated[str | None, Field(description="Goal page ID to link.")] = None,
     content: Annotated[
         str | None,
-        Field(description=(
-            "Page body content as markdown. Supports: # headings, - bullets, "
-            "1. numbered lists, - [ ] to-dos, ```code blocks```, > quotes, --- dividers, "
-            "and plain paragraphs."
-        )),
+        Field(
+            description=(
+                "Page body content as markdown. Supports: # headings, - bullets, "
+                "1. numbered lists, - [ ] to-dos, ```code blocks```, > quotes, --- dividers, "
+                "and plain paragraphs."
+            )
+        ),
     ] = None,
     ctx: Context = None,
 ) -> dict:
@@ -1053,7 +1078,9 @@ async def search_notes(
     project_id: Annotated[str | None, Field(description="Filter by project page ID.")] = None,
     tag_id: Annotated[str | None, Field(description="Filter by tag page ID.")] = None,
     favorite: Annotated[bool | None, Field(description="Filter to favorites only.")] = None,
-    date_after: Annotated[str | None, Field(description="Notes on or after this date (YYYY-MM-DD).")] = None,
+    date_after: Annotated[
+        str | None, Field(description="Notes on or after this date (YYYY-MM-DD).")
+    ] = None,
     query: Annotated[str | None, Field(description="Text to search for in note titles.")] = None,
     limit: Annotated[int, Field(description="Maximum results.", ge=1, le=100)] = 50,
     ctx: Context = None,
@@ -1082,9 +1109,7 @@ async def search_notes(
     sorts = [{"property": "Note Date", "direction": "descending"}]
 
     try:
-        pages = await app.client.query_all(
-            app.config.notes_ds_id, filter=query_filter, sorts=sorts
-        )
+        pages = await app.client.query_all(app.config.notes_ds_id, filter=query_filter, sorts=sorts)
         return [format_note(p) for p in pages[:limit]]
     except NotionAPIError as e:
         return _handle_api_error(e)
@@ -1126,11 +1151,13 @@ async def create_note(
     source_url: Annotated[str | None, Field(description="Source URL for the note.")] = None,
     content: Annotated[
         str | None,
-        Field(description=(
-            "Page body content as markdown. Supports: # headings, - bullets, "
-            "1. numbered lists, - [ ] to-dos, ```code blocks```, > quotes, --- dividers, "
-            "and plain paragraphs."
-        )),
+        Field(
+            description=(
+                "Page body content as markdown. Supports: # headings, - bullets, "
+                "1. numbered lists, - [ ] to-dos, ```code blocks```, > quotes, --- dividers, "
+                "and plain paragraphs."
+            )
+        ),
     ] = None,
     ctx: Context = None,
 ) -> dict:
@@ -1171,7 +1198,9 @@ async def update_note(
         Field(description=f"New type. Options: {', '.join(NOTE_TYPES)}."),
     ] = None,
     project_id: Annotated[str | None, Field(description="New project page ID.")] = None,
-    tag_ids: Annotated[list[str] | None, Field(description="New tag page IDs (replaces existing).")] = None,
+    tag_ids: Annotated[
+        list[str] | None, Field(description="New tag page IDs (replaces existing).")
+    ] = None,
     favorite: Annotated[bool | None, Field(description="Set favorite flag.")] = None,
     source_url: Annotated[str | None, Field(description="New source URL.")] = None,
     ctx: Context = None,
@@ -1329,7 +1358,9 @@ async def update_tag(
 async def search_goals(
     status: Annotated[
         str | None,
-        Field(description=f"Filter by status. Options: {', '.join(GOAL_STATUSES)}. Defaults to Active."),
+        Field(
+            description=f"Filter by status. Options: {', '.join(GOAL_STATUSES)}. Defaults to Active."
+        ),
     ] = None,
     query: Annotated[
         str | None,
@@ -1353,11 +1384,15 @@ async def search_goals(
     ] = None,
     achieved_before: Annotated[
         str | None,
-        Field(description="Achieved date on or before this date (YYYY-MM-DD). Best combined with status='Achieved'."),
+        Field(
+            description="Achieved date on or before this date (YYYY-MM-DD). Best combined with status='Achieved'."
+        ),
     ] = None,
     achieved_after: Annotated[
         str | None,
-        Field(description="Achieved date on or after this date (YYYY-MM-DD). Best combined with status='Achieved'."),
+        Field(
+            description="Achieved date on or after this date (YYYY-MM-DD). Best combined with status='Achieved'."
+        ),
     ] = None,
     limit: Annotated[int, Field(description="Maximum results.", ge=1, le=100)] = 50,
     ctx: Context = None,
@@ -1392,9 +1427,7 @@ async def search_goals(
     sorts = [{"property": "Target Deadline", "direction": "ascending"}]
 
     try:
-        pages = await app.client.query_all(
-            app.config.goals_ds_id, filter=query_filter, sorts=sorts
-        )
+        pages = await app.client.query_all(app.config.goals_ds_id, filter=query_filter, sorts=sorts)
         return [format_goal(p) for p in pages[:limit]]
     except NotionAPIError as e:
         return _handle_api_error(e)
@@ -1445,11 +1478,13 @@ async def create_goal(
     project_ids: Annotated[list[str] | None, Field(description="Project page IDs to link.")] = None,
     content: Annotated[
         str | None,
-        Field(description=(
-            "Page body content as markdown. Supports: # headings, - bullets, "
-            "1. numbered lists, - [ ] to-dos, ```code blocks```, > quotes, --- dividers, "
-            "and plain paragraphs."
-        )),
+        Field(
+            description=(
+                "Page body content as markdown. Supports: # headings, - bullets, "
+                "1. numbered lists, - [ ] to-dos, ```code blocks```, > quotes, --- dividers, "
+                "and plain paragraphs."
+            )
+        ),
     ] = None,
     ctx: Context = None,
 ) -> dict:
@@ -1486,7 +1521,9 @@ async def update_goal(
     ] = None,
     deadline: Annotated[str | None, Field(description="New deadline (YYYY-MM-DD).")] = None,
     tag_id: Annotated[str | None, Field(description="New tag page ID.")] = None,
-    project_ids: Annotated[list[str] | None, Field(description="New project page IDs (replaces existing).")] = None,
+    project_ids: Annotated[
+        list[str] | None, Field(description="New project page IDs (replaces existing).")
+    ] = None,
     ctx: Context = None,
 ) -> dict:
     """Update goal properties. Only provided fields are changed.
@@ -1608,7 +1645,12 @@ async def daily_summary(
     annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=True, idempotentHint=True)
 )
 async def archive_item(
-    page_id: Annotated[str, Field(description="Page ID of any Ultimate Brain item (task, project, note, tag, or goal).")],
+    page_id: Annotated[
+        str,
+        Field(
+            description="Page ID of any Ultimate Brain item (task, project, note, tag, or goal)."
+        ),
+    ],
     ctx: Context = None,
 ) -> dict:
     """Archive any Ultimate Brain item by setting its Archived checkbox to true.
@@ -1680,17 +1722,21 @@ async def set_page_content(
     page_id: Annotated[str, Field(description="Page ID of any Notion page.")],
     content: Annotated[
         str,
-        Field(description=(
-            "Page body content as enhanced Markdown. Supports # headings, "
-            "- bullets, 1. numbered lists, - [ ] to-dos, ```code blocks```, "
-            "> quotes, --- dividers, tables, and plain paragraphs. NOTE: rich "
-            "blocks (tables, toggles, deep nesting) only round-trip faithfully "
-            "in 'replace' mode; 'append' uses a simpler local converter."
-        )),
+        Field(
+            description=(
+                "Page body content as enhanced Markdown. Supports # headings, "
+                "- bullets, 1. numbered lists, - [ ] to-dos, ```code blocks```, "
+                "> quotes, --- dividers, tables, and plain paragraphs. NOTE: rich "
+                "blocks (tables, toggles, deep nesting) only round-trip faithfully "
+                "in 'replace' mode; 'append' uses a simpler local converter."
+            )
+        ),
     ],
     mode: Annotated[
         Literal["replace", "append"],
-        Field(description="'replace' overwrites the whole page body (default). 'append' adds after existing content."),
+        Field(
+            description="'replace' overwrites the whole page body (default). 'append' adds after existing content."
+        ),
     ] = "replace",
     ctx: Context = None,
 ) -> dict:
@@ -1708,9 +1754,7 @@ async def set_page_content(
         existing = await app.client.get_blocks(page_id)
         deleted = 0
         if existing:
-            await _bounded_gather(
-                [app.client.delete_block(b["id"]) for b in existing]
-            )
+            await _bounded_gather([app.client.delete_block(b["id"]) for b in existing])
             deleted = len(existing)
         if new_blocks:
             await app.client.append_blocks(page_id, new_blocks)
@@ -1774,13 +1818,15 @@ async def patch_page_content(
     page_id: Annotated[str, Field(description="Page ID of any Notion page.")],
     edits: Annotated[
         list[dict],
-        Field(description=(
-            "Up to 100 find-and-replace edits applied in order. Each is "
-            "{'old_str': <exact existing Markdown>, 'new_str': <replacement, "
-            "must be non-empty>, 'replace_all_matches': <bool, optional, default "
-            "false>}. old_str must match the page's current Markdown exactly (use "
-            "get_page_content to see it). To delete content, use set_page_content."
-        )),
+        Field(
+            description=(
+                "Up to 100 find-and-replace edits applied in order. Each is "
+                "{'old_str': <exact existing Markdown>, 'new_str': <replacement, "
+                "must be non-empty>, 'replace_all_matches': <bool, optional, default "
+                "false>}. old_str must match the page's current Markdown exactly (use "
+                "get_page_content to see it). To delete content, use set_page_content."
+            )
+        ),
     ],
     ctx: Context = None,
 ) -> dict:
@@ -1917,12 +1963,8 @@ async def daily_review_snapshot(
     overdue_or_today_filter = {
         "and": [not_done, {"property": "Due", "date": {"on_or_before": today}}]
     }
-    due_tomorrow_filter = {
-        "and": [not_done, {"property": "Due", "date": {"equals": tomorrow}}]
-    }
-    on_my_day_filter = {
-        "and": [not_done, {"property": "My Day", "checkbox": {"equals": True}}]
-    }
+    due_tomorrow_filter = {"and": [not_done, {"property": "Due", "date": {"equals": tomorrow}}]}
+    on_my_day_filter = {"and": [not_done, {"property": "My Day", "checkbox": {"equals": True}}]}
     inbox_filter = {
         "and": [
             {"property": "Status", "status": {"equals": "To Do"}},
@@ -2056,13 +2098,9 @@ class BulkTaskUpdate(BaseModel):
         default=None, description="New priority."
     )
     project_id: str | None = Field(default=None, description="New project page ID.")
-    labels: list[str] | None = Field(
-        default=None, description="New labels (replaces existing)."
-    )
+    labels: list[str] | None = Field(default=None, description="New labels (replaces existing).")
     my_day: bool | None = Field(default=None, description="Set My Day flag.")
-    parent_task_id: str | None = Field(
-        default=None, description="New parent task page ID."
-    )
+    parent_task_id: str | None = Field(default=None, description="New parent task page ID.")
     tag_ids: list[str] | None = Field(
         default=None, description="New Tag relation IDs (replaces existing)."
     )
@@ -2137,9 +2175,7 @@ async def bulk_update_tasks(
             if update.tag_ids is not None:
                 props["Tag"] = _prop_relation(update.tag_ids)
             if update.location is not None:
-                payload, warning = _build_location_payload(
-                    app.tasks_schema, update.location
-                )
+                payload, warning = _build_location_payload(app.tasks_schema, update.location)
                 if payload is not None and app.tasks_schema.location_property_name:
                     props[app.tasks_schema.location_property_name] = payload
                 if warning:
@@ -2149,9 +2185,7 @@ async def bulk_update_tasks(
                 return {
                     "task_id": update.task_id,
                     "ok": False,
-                    "error": (
-                        "No properties to update. Provide at least one field."
-                    ),
+                    "error": ("No properties to update. Provide at least one field."),
                 }
 
             try:
@@ -2175,9 +2209,7 @@ async def bulk_update_tasks(
                     "error": err.get("error", str(e)),
                 }
 
-    results = await asyncio.gather(
-        *(_apply_one(i, u) for i, u in enumerate(updates))
-    )
+    results = await asyncio.gather(*(_apply_one(i, u) for i, u in enumerate(updates)))
     ok_count = sum(1 for r in results if r.get("ok"))
     failed_count = len(results) - ok_count
     return {
@@ -2197,7 +2229,9 @@ async def bulk_update_tasks(
 async def query_database(
     database: Annotated[
         str | None,
-        Field(description="Database name (e.g. 'Work Sessions', 'Books', 'People'). Omit to list available databases."),
+        Field(
+            description="Database name (e.g. 'Work Sessions', 'Books', 'People'). Omit to list available databases."
+        ),
     ] = None,
     filter: Annotated[
         dict | None,
@@ -2205,7 +2239,9 @@ async def query_database(
     ] = None,
     sorts: Annotated[
         list[dict] | None,
-        Field(description="Notion sorts array. E.g. [{'property': 'Name', 'direction': 'ascending'}]"),
+        Field(
+            description="Notion sorts array. E.g. [{'property': 'Name', 'direction': 'ascending'}]"
+        ),
     ] = None,
     limit: Annotated[int, Field(description="Maximum results.", ge=1, le=100)] = 50,
     ctx: Context = None,
@@ -2283,12 +2319,14 @@ async def update_page(
     page_id: Annotated[str, Field(description="Page ID to update.")],
     properties: Annotated[
         dict,
-        Field(description=(
-            "Dict of property name → value. Auto-coerces types: "
-            "str for title/rich_text/select/status, list[str] for multi_select, "
-            "bool for checkbox, float/int for number, "
-            "{'start': 'YYYY-MM-DD'} for date, list[str] for relation IDs."
-        )),
+        Field(
+            description=(
+                "Dict of property name → value. Auto-coerces types: "
+                "str for title/rich_text/select/status, list[str] for multi_select, "
+                "bool for checkbox, float/int for number, "
+                "{'start': 'YYYY-MM-DD'} for date, list[str] for relation IDs."
+            )
+        ),
     ],
     ctx: Context = None,
 ) -> dict:
@@ -2307,8 +2345,10 @@ async def update_page(
 
     for prop_name, value in properties.items():
         if prop_name not in existing_props:
-            return _error(f"Property '{prop_name}' not found on this page. "
-                         f"Available: {', '.join(existing_props.keys())}")
+            return _error(
+                f"Property '{prop_name}' not found on this page. "
+                f"Available: {', '.join(existing_props.keys())}"
+            )
 
         ptype = existing_props[prop_name].get("type")
         try:

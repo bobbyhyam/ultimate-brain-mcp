@@ -14,6 +14,9 @@ import pytest
 from mcp import ClientSession
 from mcp.client.stdio import StdioServerParameters, stdio_client
 
+# Whole module exercises the live Notion API — deselected by default (-m 'not live').
+pytestmark = pytest.mark.live
+
 
 @pytest.fixture(scope="session")
 def server_params():
@@ -77,9 +80,7 @@ async def test_create_note_with_250_blocks(server_params, _check_env):
                 page_id = data["id"]
 
                 # Read back and verify all bullets are present in order.
-                read_result = await session.call_tool(
-                    "get_note_content", {"note_id": page_id}
-                )
+                read_result = await session.call_tool("get_note_content", {"note_id": page_id})
                 note = _parse_result(read_result)
                 body = note["content"]
                 # Spot-check first, mid, last items.
@@ -133,9 +134,7 @@ async def test_set_page_content_replace_300_blocks(server_params, _check_env):
                     assert replace_data["blocks_deleted"] == 120
 
                 # Verify new content is present and old content is gone.
-                read_result = await session.call_tool(
-                    "get_note_content", {"note_id": page_id}
-                )
+                read_result = await session.call_tool("get_note_content", {"note_id": page_id})
                 body = _parse_result(read_result)["content"]
                 assert "New item 0" in body
                 assert "New item 199" in body
@@ -155,12 +154,7 @@ async def test_deeply_nested_lists_round_trip(server_params, _check_env):
             try:
                 # 4-level nested bullets. Notion only allows 2 levels per
                 # request, so levels 3-4 must be deferred.
-                content = (
-                    "- Level 1\n"
-                    "  - Level 2\n"
-                    "    - Level 3\n"
-                    "      - Level 4 leaf"
-                )
+                content = "- Level 1\n  - Level 2\n    - Level 3\n      - Level 4 leaf"
                 result = await session.call_tool(
                     "create_note",
                     {
@@ -171,9 +165,7 @@ async def test_deeply_nested_lists_round_trip(server_params, _check_env):
                 )
                 page_id = _parse_result(result)["id"]
 
-                read_result = await session.call_tool(
-                    "get_note_content", {"note_id": page_id}
-                )
+                read_result = await session.call_tool("get_note_content", {"note_id": page_id})
                 body = _parse_result(read_result)["content"]
                 # All four levels must appear in the recursive read.
                 assert "Level 1" in body

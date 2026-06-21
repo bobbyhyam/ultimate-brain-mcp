@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import pytest
-
 from ultimate_brain_mcp.formatters import _make_rich_text, blocks_to_text, text_to_blocks
 
 
@@ -27,9 +25,7 @@ class TestParagraphs:
         assert len(blocks) == 1
         assert blocks[0]["type"] == "paragraph"
         # Content may be split across multiple rich_text segments (softbreaks)
-        full_text = "".join(
-            seg["text"]["content"] for seg in blocks[0]["paragraph"]["rich_text"]
-        )
+        full_text = "".join(seg["text"]["content"] for seg in blocks[0]["paragraph"]["rich_text"])
         assert "Line one" in full_text
         assert "Line two" in full_text
         assert "Line three" in full_text
@@ -280,7 +276,8 @@ class TestInlineFormatting:
     def test_bold_italic_nested(self):
         segments = _make_rich_text("This is ***bold italic***")
         bi_segs = [
-            s for s in segments
+            s
+            for s in segments
             if s.get("annotations", {}).get("bold") and s.get("annotations", {}).get("italic")
         ]
         assert len(bi_segs) == 1

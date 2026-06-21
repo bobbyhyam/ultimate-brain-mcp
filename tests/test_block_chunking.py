@@ -14,14 +14,12 @@ import pytest
 
 from ultimate_brain_mcp.formatters import _make_rich_text, text_to_blocks
 from ultimate_brain_mcp.notion_client import (
-    MAX_CHILDREN_PER_ARRAY,
     NotionAPIError,
     NotionClient,
     PartialWriteError,
     _RateLimiter,
     _split_for_depth,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -119,17 +117,14 @@ class TestSplitForDepth:
         )
 
     def test_does_not_mutate_input(self):
-        original = [
-            _bullet("P", children=[_bullet("C", children=[_bullet("G")])])
-        ]
-        snapshot_id = id(original[0]["bulleted_list_item"]["children"][0]["bulleted_list_item"]["children"])
+        original = [_bullet("P", children=[_bullet("C", children=[_bullet("G")])])]
+        snapshot_id = id(
+            original[0]["bulleted_list_item"]["children"][0]["bulleted_list_item"]["children"]
+        )
         _split_for_depth(original)
 
         # Input still has the grandchild
-        assert (
-            "children"
-            in original[0]["bulleted_list_item"]["children"][0]["bulleted_list_item"]
-        )
+        assert "children" in original[0]["bulleted_list_item"]["children"][0]["bulleted_list_item"]
         assert (
             id(original[0]["bulleted_list_item"]["children"][0]["bulleted_list_item"]["children"])
             == snapshot_id
@@ -309,7 +304,6 @@ class TestAppendChunking:
 
             async def fake_request(method, url, **kwargs):
                 if "/blocks/" in url and "children" in url:
-                    n_so_far = sum(len(c["children"]) for c in [kwargs["json"]])
                     # Succeed on first batch, fail on second.
                     if not hasattr(fake_request, "calls"):
                         fake_request.calls = 0
@@ -318,9 +312,7 @@ class TestAppendChunking:
                         return _mock_response(
                             200, json_body={"results": kwargs["json"]["children"]}
                         )
-                    return _mock_response(
-                        500, json_body={"code": "internal", "message": "boom"}
-                    )
+                    return _mock_response(500, json_body={"code": "internal", "message": "boom"})
                 return _mock_response(200, json_body={"results": []})
 
             client._client.request = AsyncMock(side_effect=fake_request)

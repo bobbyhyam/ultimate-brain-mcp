@@ -9,6 +9,9 @@ import pytest
 from mcp import ClientSession
 from mcp.client.stdio import StdioServerParameters, stdio_client
 
+# Whole module exercises the live Notion API — deselected by default (-m 'not live').
+pytestmark = pytest.mark.live
+
 
 # ---------------------------------------------------------------------------
 # Shared fixtures / helpers
@@ -96,11 +99,14 @@ async def test_create_note_with_content(server_params, _check_env):
             page_id = None
             try:
                 content = "# Overview\n\nThis is a test note body.\n\n- Point one\n- Point two"
-                result = await session.call_tool("create_note", {
-                    "name": "[TEST] Note With Content",
-                    "note_type": "Note",
-                    "content": content,
-                })
+                result = await session.call_tool(
+                    "create_note",
+                    {
+                        "name": "[TEST] Note With Content",
+                        "note_type": "Note",
+                        "content": content,
+                    },
+                )
                 data = _parse_result(result)
                 assert "id" in data
                 page_id = data["id"]
@@ -126,10 +132,13 @@ async def test_create_task_with_content(server_params, _check_env):
             page_id = None
             try:
                 content = "Task description paragraph.\n\n- [ ] Sub-step one\n- [x] Sub-step two"
-                result = await session.call_tool("create_task", {
-                    "name": "[TEST] Task With Content",
-                    "content": content,
-                })
+                result = await session.call_tool(
+                    "create_task",
+                    {
+                        "name": "[TEST] Task With Content",
+                        "content": content,
+                    },
+                )
                 data = _parse_result(result)
                 assert "id" in data
                 page_id = data["id"]
@@ -154,19 +163,25 @@ async def test_set_page_content_replace(server_params, _check_env, _markdown_sup
             page_id = None
             try:
                 # Create a bare note
-                result = await session.call_tool("create_note", {
-                    "name": "[TEST] Replace Content",
-                    "note_type": "Note",
-                })
+                result = await session.call_tool(
+                    "create_note",
+                    {
+                        "name": "[TEST] Replace Content",
+                        "note_type": "Note",
+                    },
+                )
                 data = _parse_result(result)
                 page_id = data["id"]
 
                 # Set initial content
-                await session.call_tool("set_page_content", {
-                    "page_id": page_id,
-                    "content": "Initial content paragraph.",
-                    "mode": "replace",
-                })
+                await session.call_tool(
+                    "set_page_content",
+                    {
+                        "page_id": page_id,
+                        "content": "Initial content paragraph.",
+                        "mode": "replace",
+                    },
+                )
 
                 # Verify initial content
                 result2 = await session.call_tool("get_page_content", {"page_id": page_id})
@@ -174,11 +189,16 @@ async def test_set_page_content_replace(server_params, _check_env, _markdown_sup
                 assert "Initial content" in page["content"]
 
                 # Replace with new content
-                replace_res = _parse_result(await session.call_tool("set_page_content", {
-                    "page_id": page_id,
-                    "content": "Replaced content paragraph.",
-                    "mode": "replace",
-                }))
+                replace_res = _parse_result(
+                    await session.call_tool(
+                        "set_page_content",
+                        {
+                            "page_id": page_id,
+                            "content": "Replaced content paragraph.",
+                            "mode": "replace",
+                        },
+                    )
+                )
                 # Confirms the markdown engine ran, not the block fallback
                 assert replace_res["engine"] == "markdown"
 
@@ -201,20 +221,26 @@ async def test_set_page_content_append(server_params, _check_env):
             page_id = None
             try:
                 # Create note with initial content
-                result = await session.call_tool("create_note", {
-                    "name": "[TEST] Append Content",
-                    "note_type": "Note",
-                    "content": "Original first paragraph.",
-                })
+                result = await session.call_tool(
+                    "create_note",
+                    {
+                        "name": "[TEST] Append Content",
+                        "note_type": "Note",
+                        "content": "Original first paragraph.",
+                    },
+                )
                 data = _parse_result(result)
                 page_id = data["id"]
 
                 # Append more content
-                await session.call_tool("set_page_content", {
-                    "page_id": page_id,
-                    "content": "Appended second paragraph.",
-                    "mode": "append",
-                })
+                await session.call_tool(
+                    "set_page_content",
+                    {
+                        "page_id": page_id,
+                        "content": "Appended second paragraph.",
+                        "mode": "append",
+                    },
+                )
 
                 # Verify both are present
                 result2 = await session.call_tool("get_page_content", {"page_id": page_id})
@@ -235,20 +261,26 @@ async def test_set_page_content_clear(server_params, _check_env):
             page_id = None
             try:
                 # Create note with content
-                result = await session.call_tool("create_note", {
-                    "name": "[TEST] Clear Content",
-                    "note_type": "Note",
-                    "content": "Content to be cleared.",
-                })
+                result = await session.call_tool(
+                    "create_note",
+                    {
+                        "name": "[TEST] Clear Content",
+                        "note_type": "Note",
+                        "content": "Content to be cleared.",
+                    },
+                )
                 data = _parse_result(result)
                 page_id = data["id"]
 
                 # Clear content
-                await session.call_tool("set_page_content", {
-                    "page_id": page_id,
-                    "content": "",
-                    "mode": "replace",
-                })
+                await session.call_tool(
+                    "set_page_content",
+                    {
+                        "page_id": page_id,
+                        "content": "",
+                        "mode": "replace",
+                    },
+                )
 
                 # Verify empty
                 result2 = await session.call_tool("get_page_content", {"page_id": page_id})
@@ -267,11 +299,14 @@ async def test_get_page_content(server_params, _check_env):
             await session.initialize()
             page_id = None
             try:
-                result = await session.call_tool("create_note", {
-                    "name": "[TEST] Get Page Content",
-                    "note_type": "Note",
-                    "content": "Body text for generic reader.",
-                })
+                result = await session.call_tool(
+                    "create_note",
+                    {
+                        "name": "[TEST] Get Page Content",
+                        "note_type": "Note",
+                        "content": "Body text for generic reader.",
+                    },
+                )
                 data = _parse_result(result)
                 page_id = data["id"]
 
@@ -295,21 +330,27 @@ async def test_patch_page_content_find_replace(server_params, _check_env, _markd
             await session.initialize()
             page_id = None
             try:
-                result = await session.call_tool("create_note", {
-                    "name": "[TEST] Patch Content",
-                    "note_type": "Note",
-                    "content": "alpha line\nbeta line\ngamma line",
-                })
+                result = await session.call_tool(
+                    "create_note",
+                    {
+                        "name": "[TEST] Patch Content",
+                        "note_type": "Note",
+                        "content": "alpha line\nbeta line\ngamma line",
+                    },
+                )
                 page_id = _parse_result(result)["id"]
 
                 # Single edit + a multi-target edit in one call
-                patched = await session.call_tool("patch_page_content", {
-                    "page_id": page_id,
-                    "edits": [
-                        {"old_str": "alpha", "new_str": "ALPHA"},
-                        {"old_str": "beta", "new_str": "BETA"},
-                    ],
-                })
+                patched = await session.call_tool(
+                    "patch_page_content",
+                    {
+                        "page_id": page_id,
+                        "edits": [
+                            {"old_str": "alpha", "new_str": "ALPHA"},
+                            {"old_str": "beta", "new_str": "BETA"},
+                        ],
+                    },
+                )
                 pdata = _parse_result(patched)
                 assert pdata.get("ok") is True
                 assert pdata.get("edits_applied") == 2
@@ -329,26 +370,34 @@ async def test_patch_page_content_find_replace(server_params, _check_env, _markd
 
 
 @pytest.mark.asyncio
-async def test_patch_page_content_replace_all_matches(server_params, _check_env, _markdown_supported):
+async def test_patch_page_content_replace_all_matches(
+    server_params, _check_env, _markdown_supported
+):
     """replace_all_matches replaces every occurrence, not just the first."""
     async with stdio_client(server_params) as (read, write):
         async with ClientSession(read, write) as session:
             await session.initialize()
             page_id = None
             try:
-                result = await session.call_tool("create_note", {
-                    "name": "[TEST] Patch Replace All",
-                    "note_type": "Note",
-                    "content": "TODO one\nTODO two\nTODO three",
-                })
+                result = await session.call_tool(
+                    "create_note",
+                    {
+                        "name": "[TEST] Patch Replace All",
+                        "note_type": "Note",
+                        "content": "TODO one\nTODO two\nTODO three",
+                    },
+                )
                 page_id = _parse_result(result)["id"]
 
-                await session.call_tool("patch_page_content", {
-                    "page_id": page_id,
-                    "edits": [
-                        {"old_str": "TODO", "new_str": "DONE", "replace_all_matches": True},
-                    ],
-                })
+                await session.call_tool(
+                    "patch_page_content",
+                    {
+                        "page_id": page_id,
+                        "edits": [
+                            {"old_str": "TODO", "new_str": "DONE", "replace_all_matches": True},
+                        ],
+                    },
+                )
 
                 page = _parse_result(
                     await session.call_tool("get_page_content", {"page_id": page_id})
@@ -367,22 +416,34 @@ async def test_patch_page_content_validation(server_params, _check_env):
         async with ClientSession(read, write) as session:
             await session.initialize()
             # Empty edits → error payload, no exception
-            empty = _parse_result(await session.call_tool("patch_page_content", {
-                "page_id": "00000000-0000-0000-0000-000000000000",
-                "edits": [],
-            }))
+            empty = _parse_result(
+                await session.call_tool(
+                    "patch_page_content",
+                    {
+                        "page_id": "00000000-0000-0000-0000-000000000000",
+                        "edits": [],
+                    },
+                )
+            )
             assert empty.get("error")
 
             # Missing new_str → error payload
-            malformed = _parse_result(await session.call_tool("patch_page_content", {
-                "page_id": "00000000-0000-0000-0000-000000000000",
-                "edits": [{"old_str": "x"}],
-            }))
+            malformed = _parse_result(
+                await session.call_tool(
+                    "patch_page_content",
+                    {
+                        "page_id": "00000000-0000-0000-0000-000000000000",
+                        "edits": [{"old_str": "x"}],
+                    },
+                )
+            )
             assert malformed.get("error")
 
 
 @pytest.mark.asyncio
-async def test_set_page_content_rich_block_roundtrip(server_params, _check_env, _markdown_supported):
+async def test_set_page_content_rich_block_roundtrip(
+    server_params, _check_env, _markdown_supported
+):
     """Tables and nested bullets survive a markdown write→read round-trip.
 
     This is the payoff of the server-side markdown engine — the old block
@@ -393,10 +454,13 @@ async def test_set_page_content_rich_block_roundtrip(server_params, _check_env, 
             await session.initialize()
             page_id = None
             try:
-                result = await session.call_tool("create_note", {
-                    "name": "[TEST] Rich Block Roundtrip",
-                    "note_type": "Note",
-                })
+                result = await session.call_tool(
+                    "create_note",
+                    {
+                        "name": "[TEST] Rich Block Roundtrip",
+                        "note_type": "Note",
+                    },
+                )
                 page_id = _parse_result(result)["id"]
 
                 rich = (
@@ -408,11 +472,14 @@ async def test_set_page_content_rich_block_roundtrip(server_params, _check_env, 
                     "- parent bullet\n"
                     "  - nested child\n"
                 )
-                await session.call_tool("set_page_content", {
-                    "page_id": page_id,
-                    "content": rich,
-                    "mode": "replace",
-                })
+                await session.call_tool(
+                    "set_page_content",
+                    {
+                        "page_id": page_id,
+                        "content": rich,
+                        "mode": "replace",
+                    },
+                )
 
                 page = _parse_result(
                     await session.call_tool("get_page_content", {"page_id": page_id})
@@ -438,20 +505,28 @@ async def test_patch_page_content_partial_unmatched(server_params, _check_env, _
             await session.initialize()
             page_id = None
             try:
-                result = await session.call_tool("create_note", {
-                    "name": "[TEST] Patch Unmatched",
-                    "note_type": "Note",
-                    "content": "keep this line and changeme too",
-                })
+                result = await session.call_tool(
+                    "create_note",
+                    {
+                        "name": "[TEST] Patch Unmatched",
+                        "note_type": "Note",
+                        "content": "keep this line and changeme too",
+                    },
+                )
                 page_id = _parse_result(result)["id"]
 
-                res = _parse_result(await session.call_tool("patch_page_content", {
-                    "page_id": page_id,
-                    "edits": [
-                        {"old_str": "changeme", "new_str": "CHANGED"},
-                        {"old_str": "DOES_NOT_EXIST_XYZ", "new_str": "q"},
-                    ],
-                }))
+                res = _parse_result(
+                    await session.call_tool(
+                        "patch_page_content",
+                        {
+                            "page_id": page_id,
+                            "edits": [
+                                {"old_str": "changeme", "new_str": "CHANGED"},
+                                {"old_str": "DOES_NOT_EXIST_XYZ", "new_str": "q"},
+                            ],
+                        },
+                    )
+                )
                 # One landed, one reported as unmatched; ok is False overall
                 assert res["ok"] is False
                 assert res["edits_applied"] == 1

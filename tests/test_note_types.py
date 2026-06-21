@@ -15,7 +15,6 @@ import os
 from datetime import date
 
 import pytest
-import pytest_asyncio
 from mcp import ClientSession
 from mcp.client.stdio import StdioServerParameters, stdio_client
 
@@ -26,7 +25,6 @@ from ultimate_brain_mcp.config import (
     extract_select_options,
 )
 from ultimate_brain_mcp.notion_client import NotionClient
-
 
 # ---------------------------------------------------------------------------
 # Pure helper tests — no Notion creds required
@@ -77,9 +75,19 @@ def test_extract_select_options_empty_schema():
 def test_note_types_static_default_is_v3():
     """The static fallback list is UB v3.0's 13 options with 'Meeting' (not 'Meeting Notes')."""
     expected = {
-        "Journal", "Meeting", "Web Clip", "Lecture", "Reference",
-        "Book", "Idea", "Plan", "Recipe", "Voice Note",
-        "Daily", "Note", "Brainstorm",
+        "Journal",
+        "Meeting",
+        "Web Clip",
+        "Lecture",
+        "Reference",
+        "Book",
+        "Idea",
+        "Plan",
+        "Recipe",
+        "Voice Note",
+        "Daily",
+        "Note",
+        "Brainstorm",
     }
     assert set(NOTE_TYPES) == expected
     assert "Meeting" in NOTE_TYPES
@@ -92,6 +100,7 @@ def test_note_types_static_default_is_v3():
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.live
 @pytest.mark.asyncio
 async def test_get_data_source_returns_schema(notion_client: NotionClient, ub_config: UBConfig):
     """Live: GET /v1/data_sources/{id} returns a dict containing the Type select."""
@@ -141,6 +150,7 @@ def _parse_result(result):
     return [json.loads(t) for t in texts]
 
 
+@pytest.mark.live
 @pytest.mark.asyncio
 @pytest.mark.parametrize("note_type", ["Idea", "Voice Note", "Web Clip"])
 async def test_create_note_with_v3_types(server_params, _check_env, note_type):
@@ -150,9 +160,7 @@ async def test_create_note_with_v3_types(server_params, _check_env, note_type):
     async with stdio_client(server_params) as (read, write):
         async with ClientSession(read, write) as session:
             await session.initialize()
-            create = await session.call_tool(
-                "create_note", {"name": title, "note_type": note_type}
-            )
+            create = await session.call_tool("create_note", {"name": title, "note_type": note_type})
             data = _parse_result(create)
             assert isinstance(data, dict), f"Expected dict, got {data!r}"
             assert "error" not in data, f"create_note rejected '{note_type}': {data}"
@@ -166,10 +174,9 @@ async def test_create_note_with_v3_types(server_params, _check_env, note_type):
                 await session.call_tool("archive_item", {"page_id": page_id})
 
 
+@pytest.mark.live
 @pytest.mark.asyncio
-async def test_create_note_invalid_type_returns_error_with_valid_options(
-    server_params, _check_env
-):
+async def test_create_note_invalid_type_returns_error_with_valid_options(server_params, _check_env):
     """An invalid note_type yields an error dict that lists the live valid options."""
     async with stdio_client(server_params) as (read, write):
         async with ClientSession(read, write) as session:
@@ -188,6 +195,7 @@ async def test_create_note_invalid_type_returns_error_with_valid_options(
             assert "Idea" in err, f"Error should list valid options. Got: {err}"
 
 
+@pytest.mark.live
 @pytest.mark.asyncio
 async def test_search_notes_invalid_type_returns_error(server_params, _check_env):
     """search_notes also validates note_type — symmetry check with create_note."""

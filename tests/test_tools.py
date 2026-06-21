@@ -9,6 +9,9 @@ import pytest
 from mcp import ClientSession
 from mcp.client.stdio import StdioServerParameters, stdio_client
 
+# Whole module exercises the live Notion API — deselected by default (-m 'not live').
+pytestmark = pytest.mark.live
+
 
 # ---------------------------------------------------------------------------
 # Helper: call a tool via in-process MCP session
@@ -75,19 +78,37 @@ async def test_list_tools(server_params, _check_env):
             assert len(names) >= 31, f"Expected 31+ tools, got {len(names)}: {names}"
 
             expected = [
-                "search_tasks", "get_my_day", "get_inbox_tasks",
-                "create_task", "update_task", "complete_task",
-                "search_projects", "get_project_detail",
-                "create_project", "update_project",
-                "search_notes", "get_note_content",
-                "create_note", "update_note",
-                "search_tags", "create_tag", "update_tag",
-                "search_goals", "get_goal_detail",
-                "create_goal", "update_goal",
-                "daily_summary", "archive_item", "set_page_content",
+                "search_tasks",
+                "get_my_day",
+                "get_inbox_tasks",
+                "create_task",
+                "update_task",
+                "complete_task",
+                "search_projects",
+                "get_project_detail",
+                "create_project",
+                "update_project",
+                "search_notes",
+                "get_note_content",
+                "create_note",
+                "update_note",
+                "search_tags",
+                "create_tag",
+                "update_tag",
+                "search_goals",
+                "get_goal_detail",
+                "create_goal",
+                "update_goal",
+                "daily_summary",
+                "archive_item",
+                "set_page_content",
                 "patch_page_content",
-                "daily_review_snapshot", "bulk_update_tasks",
-                "query_database", "get_page", "get_page_content", "update_page",
+                "daily_review_snapshot",
+                "bulk_update_tasks",
+                "query_database",
+                "get_page",
+                "get_page_content",
+                "update_page",
             ]
             for name in expected:
                 assert name in names, f"Tool '{name}' not found"
@@ -323,8 +344,7 @@ async def test_bulk_update_tasks_partial_failure(server_params, _check_env):
             assert data["summary"]["failed"] >= 1
             # The bogus row must surface a structured error, not raise
             bogus_row = next(
-                r for r in data["results"]
-                if r["task_id"] == "00000000-0000-0000-0000-000000000000"
+                r for r in data["results"] if r["task_id"] == "00000000-0000-0000-0000-000000000000"
             )
             assert bogus_row["ok"] is False
             assert "error" in bogus_row and bogus_row["error"]

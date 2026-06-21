@@ -49,20 +49,26 @@ async def notion_client(ub_config: UBConfig):
 # Property builders (mirrors server.py helpers, kept local to avoid coupling)
 # ---------------------------------------------------------------------------
 
+
 def _title(text: str) -> dict:
     return {"title": [{"text": {"content": text}}]}
+
 
 def _status(name: str) -> dict:
     return {"status": {"name": name}}
 
+
 def _select(name: str) -> dict:
     return {"select": {"name": name}}
+
 
 def _date(start: str) -> dict:
     return {"date": {"start": start}}
 
+
 def _relation(ids: list[str]) -> dict:
     return {"relation": [{"id": i} for i in ids]}
+
 
 def _checkbox(val: bool) -> dict:
     return {"checkbox": val}
@@ -78,10 +84,13 @@ TEST_PREFIX = "[TEST] "
 @pytest_asyncio.fixture
 async def seed_tag(notion_client: NotionClient, ub_config: UBConfig):
     """Create a test tag, yield it, then archive it."""
-    page = await notion_client.create_page(ub_config.tags_ds_id, {
-        "Name": _title(f"{TEST_PREFIX}Test Area Tag"),
-        "Type": _status("Area"),
-    })
+    page = await notion_client.create_page(
+        ub_config.tags_ds_id,
+        {
+            "Name": _title(f"{TEST_PREFIX}Test Area Tag"),
+            "Type": _status("Area"),
+        },
+    )
     yield page
     await notion_client.update_page(page["id"], {"Archived": _checkbox(True)})
 
@@ -89,12 +98,15 @@ async def seed_tag(notion_client: NotionClient, ub_config: UBConfig):
 @pytest_asyncio.fixture
 async def seed_goal(notion_client: NotionClient, ub_config: UBConfig, seed_tag):
     """Create a test goal linked to the seed tag, yield it, then archive it."""
-    page = await notion_client.create_page(ub_config.goals_ds_id, {
-        "Name": _title(f"{TEST_PREFIX}Test Goal"),
-        "Status": _status("Active"),
-        "Target Deadline": _date("2026-12-31"),
-        "Tag": _relation([seed_tag["id"]]),
-    })
+    page = await notion_client.create_page(
+        ub_config.goals_ds_id,
+        {
+            "Name": _title(f"{TEST_PREFIX}Test Goal"),
+            "Status": _status("Active"),
+            "Target Deadline": _date("2026-12-31"),
+            "Tag": _relation([seed_tag["id"]]),
+        },
+    )
     yield page
     await notion_client.update_page(page["id"], {"Archived": _checkbox(True)})
 
@@ -102,13 +114,16 @@ async def seed_goal(notion_client: NotionClient, ub_config: UBConfig, seed_tag):
 @pytest_asyncio.fixture
 async def seed_project(notion_client: NotionClient, ub_config: UBConfig, seed_tag, seed_goal):
     """Create a test project linked to the seed tag and goal, yield it, then archive it."""
-    page = await notion_client.create_page(ub_config.projects_ds_id, {
-        "Name": _title(f"{TEST_PREFIX}Test Project"),
-        "Status": _status("Doing"),
-        "Target Deadline": _date("2026-06-30"),
-        "Tag": _relation([seed_tag["id"]]),
-        "Goal": _relation([seed_goal["id"]]),
-    })
+    page = await notion_client.create_page(
+        ub_config.projects_ds_id,
+        {
+            "Name": _title(f"{TEST_PREFIX}Test Project"),
+            "Status": _status("Doing"),
+            "Target Deadline": _date("2026-06-30"),
+            "Tag": _relation([seed_tag["id"]]),
+            "Goal": _relation([seed_goal["id"]]),
+        },
+    )
     yield page
     await notion_client.update_page(page["id"], {"Archived": _checkbox(True)})
 
@@ -116,12 +131,15 @@ async def seed_project(notion_client: NotionClient, ub_config: UBConfig, seed_ta
 @pytest_asyncio.fixture
 async def seed_note(notion_client: NotionClient, ub_config: UBConfig, seed_tag, seed_project):
     """Create a test note linked to the seed project and tag, yield it, then archive it."""
-    page = await notion_client.create_page(ub_config.notes_ds_id, {
-        "Name": _title(f"{TEST_PREFIX}Test Note"),
-        "Type": _select("Note"),
-        "Note Date": _date(date.today().isoformat()),
-        "Project": _relation([seed_project["id"]]),
-        "Tag": _relation([seed_tag["id"]]),
-    })
+    page = await notion_client.create_page(
+        ub_config.notes_ds_id,
+        {
+            "Name": _title(f"{TEST_PREFIX}Test Note"),
+            "Type": _select("Note"),
+            "Note Date": _date(date.today().isoformat()),
+            "Project": _relation([seed_project["id"]]),
+            "Tag": _relation([seed_tag["id"]]),
+        },
+    )
     yield page
     await notion_client.update_page(page["id"], {"Archived": _checkbox(True)})

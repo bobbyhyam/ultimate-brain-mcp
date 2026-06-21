@@ -1,0 +1,33 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v4
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install dependencies
+        # --frozen asserts uv.lock is authoritative: CI fails if the lockfile is
+        # out of sync with pyproject.toml rather than silently resolving anew.
+        run: uv sync --frozen
+      - name: Lint (ruff)
+        run: uv run --frozen ruff check .
+      - name: Format check (ruff)
+        run: uv run --frozen ruff format --check .
+      - name: Type check (mypy)
+        run: uv run --frozen mypy src/
+      - name: Unit tests (credential-free)
+        # Default addopts deselects the `live` marker, so this needs no Notion
+        # credentials. The live suite runs locally via `uv run pytest -m live`.
+        run: uv run --frozen pytest

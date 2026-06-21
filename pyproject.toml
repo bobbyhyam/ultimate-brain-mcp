@@ -31,8 +31,55 @@ dev = [
     "pytest>=9.0",
     "pytest-asyncio>=1.3",
     "python-dotenv>=1.2",
+    "ruff>=0.15",
+    "mypy>=1.18",
 ]
 
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
+
+# ---------------------------------------------------------------------------
+# Tooling configuration
+# ---------------------------------------------------------------------------
+
+[tool.ruff]
+# Line length matches the codebase's existing style: most lines sit well under
+# 100; only a handful of long Field(description=...) strings exceed it (those
+# are left inline — see E501 in the ignore list below).
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+# Pragmatic rule set: pyflakes/pycodestyle errors, import sorting, pyupgrade,
+# bugbear, and comprehension lints. SIM (flake8-simplify) is intentionally
+# omitted — its SIM117 "combine with-statements" rule fires on the deliberately
+# nested `async with` blocks throughout the test suite.
+select = ["E", "F", "I", "UP", "B", "C4"]
+# Line length is owned by the formatter; long single-string Field descriptions
+# can't be wrapped, so E501 would only produce unfixable noise.
+ignore = ["E501"]
+
+[tool.mypy]
+python_version = "3.11"
+warn_unused_ignores = true
+warn_redundant_casts = true
+# FastMCP tool signatures use `ctx: Context = None` as an injection sentinel.
+# Annotating these `Context | None` would defeat FastMCP's type-based Context
+# injection, so keep mypy's pre-0.990 implicit-Optional behaviour instead.
+no_implicit_optional = false
+# Third-party packages shipped without type stubs (mcp lacks py.typed in the
+# pinned range). Keep the baseline clean rather than littering per-call ignores.
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+asyncio_mode = "strict"
+testpaths = ["tests"]
+# Default invocation runs the credential-free unit suite only. The live tests
+# (which need a Notion workspace + the env vars in .env.example) are tagged
+# `@pytest.mark.live` and deselected here; run them with `pytest -m live`.
+addopts = "-m 'not live'"
+markers = [
+    "unit: credential-free unit test (runs by default in CI)",
+    "live: requires a live Notion workspace and credentials (see .env.example)",
+]
