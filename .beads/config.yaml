@@ -1,0 +1,11 @@
+issue_prefix: ubm
+issue-prefix: ubm
+dolt.auto-start: false
+dolt:
+  disable-event-flush: true
+export.auto: false
+backup.enabled: false
+gc.endpoint_origin: inherited_city
+gc.endpoint_status: verified
+
+sync.remote: "git+https://github.com/bobbyhyam/ultimate-brain-mcp.git"
