@@ -22,6 +22,12 @@ dependencies = [
     "markdown-it-py>=3.0",
 ]
 
+[project.urls]
+Homepage = "https://github.com/bobbyhyam/ultimate-brain-mcp"
+Repository = "https://github.com/bobbyhyam/ultimate-brain-mcp"
+Issues = "https://github.com/bobbyhyam/ultimate-brain-mcp/issues"
+Changelog = "https://github.com/bobbyhyam/ultimate-brain-mcp/blob/main/CHANGELOG.md"
+
 [project.scripts]
 ultimate-brain-mcp = "ultimate_brain_mcp:main"
 ultimate-brain-setup = "ultimate_brain_mcp.setup_client:main"

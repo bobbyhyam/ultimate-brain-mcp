@@ -1,5 +1,9 @@
 # MCP Server for Ultimate Brain
 
+[![CI](https://github.com/bobbyhyam/ultimate-brain-mcp/actions/workflows/ci.yml/badge.svg)](https://github.com/bobbyhyam/ultimate-brain-mcp/actions/workflows/ci.yml)
+[![PyPI](https://img.shields.io/pypi/v/ultimate-brain-mcp)](https://pypi.org/project/ultimate-brain-mcp/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://github.com/bobbyhyam/ultimate-brain-mcp/blob/main/LICENSE)
+
 An MCP server for managing Thomas Frank's Ultimate Brain Notion system. Provides 30 workflow-oriented tools for Tasks, Projects, Notes, Tags, and Goals using the PARA methodology, plus a `daily_review_snapshot` consolidator that returns everything a daily review needs in one call.
 
 ## Setup
@@ -95,3 +99,7 @@ Set these in `.env` (or pass via the MCP client config):
 uv run pytest tests/
 uv run mcp dev src/ultimate_brain_mcp/server.py
 ```
+
+## Contributing
+
+Contributions are welcome — see **[CONTRIBUTING.md](CONTRIBUTING.md)** for development setup and guidelines, and **[CHANGELOG.md](CHANGELOG.md)** for release history.
