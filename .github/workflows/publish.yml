@@ -34,7 +34,7 @@ jobs:
           ( cd _skill_pkg && zip -r ../ultimate-brain-mcp.skill . )
           unzip -l ultimate-brain-mcp.skill
       - name: Attach to GitHub release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           files: ultimate-brain-mcp.skill
           fail_on_unmatched_files: true
